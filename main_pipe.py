@@ -11,9 +11,10 @@ import production_plots
 import pickle
 import pathlib # imported for navigating file system
 import pyarrow # imported for loading parquet files, although not referenced it is required
+import pathology_validation
+import numpy as np 
 
 def main():
-    
     # Main output (files, input) directory
     # This one is 10k 10k containment and dosim, 11 patients, 2 fractions each,  pt 181 MR as well (ran with errors in final figures)
     #main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Apr-01-2025 Time-15,04,17")  # Ensure the directory is a Path object
@@ -22,7 +23,20 @@ def main():
     # This one is 10k containment and 10 (very low) dosim for speed, all vitesse patients! 
     #main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Apr-02-2025 Time-19,38,15")
     # This one is 10k containment and 10 (very low) dosim for speed, all vitesse patients, also 2.5^3 for dil, 2.5 only for OARs
-    main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Apr-03-2025 Time-15,59,46")
+    #main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Apr-03-2025 Time-15,59,46")
+
+    # This one is 10k containment and 10 (very low) dosim for speed, all vitesse patients, also 2.5^3 for dil, 2.5 only for OARs
+    # also includes simulated cores of centroid and optimal types and repaired sampling of biopsies bug also now includes voxelwise classification of biopsy voxels into prostate double sextants
+    main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Jan-03-2026 Time-05,38,44")
+
+    
+
+
+    ## Create output directory
+    # Output directory 
+    output_dir = Path(__file__).parents[0].joinpath("output_data")
+    os.makedirs(output_dir, exist_ok=True)
+
 
 
 
@@ -68,7 +82,21 @@ def main():
 
 
 
+    ### load custom pathology dataframe
 
+    pathology_data_folder = Path("/home/matthew-muscat/Documents/UBC/Research/pathology_data")
+
+    pathology_data_path = pathology_data_folder.joinpath("pathology_data_dec_24_2025.csv")  # Ensure the directory is a Path object
+    pathology_data_df_raw = load_files.load_csv_as_dataframe(pathology_data_path)
+    pathology_data_df_na_dropped = pathology_data_df_raw.dropna(subset=['benign', 'malignant', 'maybe malignant'])
+    pathology_df = pathology_data_df_na_dropped
+
+    """
+    pathology_df.columns
+    Index(['Patient ID', 'Bx ID', 'Bx refnum', 'Bx index', 'benign', 'malignant',
+        'maybe malignant'],
+        dtype='object')
+    """
     ### Load master dicts results
 
 
@@ -184,6 +212,289 @@ def main():
     cohort_tissue_class_distances_global_path = cohort_csvs_directory.joinpath("Cohort: Tissue class - distances global results.csv")  # Ensure the directory is a Path object
     # this is a multiindex dataframe
     cohort_tissue_class_distances_global_df = load_files.load_multiindex_csv(cohort_tissue_class_distances_global_path, header_rows=[0, 1])  # Load the CSV file into a DataFrame
+    """ NOTE: The columns of the dataframe are:
+    print(cohort_tissue_class_distances_global_df.columns) =
+    MultiIndex([(                   'Patient ID',      ''),
+                (                        'Bx ID',      ''),
+                (                     'Bx index',      ''),
+                (       'Relative structure ROI',      ''),
+                (      'Relative structure type',      ''),
+                (     'Relative structure index',      ''),
+                (    'Struct. boundary NN dist.', 'count'),
+                (    'Struct. boundary NN dist.',  'mean'),
+                (    'Struct. boundary NN dist.',   'std'),
+                (    'Struct. boundary NN dist.',   'min'),
+                (    'Struct. boundary NN dist.',    '5%'),
+                (    'Struct. boundary NN dist.',   '25%'),
+                (    'Struct. boundary NN dist.',   '50%'),
+                (    'Struct. boundary NN dist.',   '75%'),
+                (    'Struct. boundary NN dist.',   '95%'),
+                (    'Struct. boundary NN dist.',   'max'),
+                (  'Dist. from struct. centroid', 'count'),
+                (  'Dist. from struct. centroid',  'mean'),
+                (  'Dist. from struct. centroid',   'std'),
+                (  'Dist. from struct. centroid',   'min'),
+                (  'Dist. from struct. centroid',    '5%'),
+                (  'Dist. from struct. centroid',   '25%'),
+                (  'Dist. from struct. centroid',   '50%'),
+                (  'Dist. from struct. centroid',   '75%'),
+                (  'Dist. from struct. centroid',   '95%'),
+                (  'Dist. from struct. centroid',   'max'),
+                ('Dist. from struct. centroid X', 'count'),
+                ('Dist. from struct. centroid X',  'mean'),
+                ('Dist. from struct. centroid X',   'std'),
+                ('Dist. from struct. centroid X',   'min'),
+                ('Dist. from struct. centroid X',    '5%'),
+                ('Dist. from struct. centroid X',   '25%'),
+                ('Dist. from struct. centroid X',   '50%'),
+                ('Dist. from struct. centroid X',   '75%'),
+                ('Dist. from struct. centroid X',   '95%'),
+                ('Dist. from struct. centroid X',   'max'),
+                ('Dist. from struct. centroid Y', 'count'),
+                ('Dist. from struct. centroid Y',  'mean'),
+                ('Dist. from struct. centroid Y',   'std'),
+                ('Dist. from struct. centroid Y',   'min'),
+                ('Dist. from struct. centroid Y',    '5%'),
+                ('Dist. from struct. centroid Y',   '25%'),
+                ('Dist. from struct. centroid Y',   '50%'),
+                ('Dist. from struct. centroid Y',   '75%'),
+                ('Dist. from struct. centroid Y',   '95%'),
+                ('Dist. from struct. centroid Y',   'max'),
+                ('Dist. from struct. centroid Z', 'count'),
+                ('Dist. from struct. centroid Z',  'mean'),
+                ('Dist. from struct. centroid Z',   'std'),
+                ('Dist. from struct. centroid Z',   'min'),
+                ('Dist. from struct. centroid Z',    '5%'),
+                ('Dist. from struct. centroid Z',   '25%'),
+                ('Dist. from struct. centroid Z',   '50%'),
+                ('Dist. from struct. centroid Z',   '75%'),
+                ('Dist. from struct. centroid Z',   '95%'),
+                ('Dist. from struct. centroid Z',   'max')],
+            )
+    """
+
+    # Cohort tissue class - distances global
+    cohort_tissue_class_distances_global_by_voxel_path = cohort_csvs_directory.joinpath("Cohort: Tissue class - distances voxel-wise results.csv")  # Ensure the directory is a Path object
+    # this is a multiindex dataframe
+    cohort_tissue_class_distances_global_by_voxel_df = load_files.load_multiindex_csv(cohort_tissue_class_distances_global_by_voxel_path, header_rows=[0, 1])  # Load the CSV file into a DataFrame
+    """ NOTE: The columns of the dataframe are:
+    print(cohort_tissue_class_distances_global_by_voxel_df.columns) = 
+    MultiIndex([(                   'Patient ID',      ''),
+                (                        'Bx ID',      ''),
+                (                     'Bx index',      ''),
+                (       'Relative structure ROI',      ''),
+                (      'Relative structure type',      ''),
+                (     'Relative structure index',      ''),
+                (                  'Voxel index',      ''),
+                (              'Voxel begin (Z)',      ''),
+                (                'Voxel end (Z)',      ''),
+                (    'Struct. boundary NN dist.', 'count'),
+                (    'Struct. boundary NN dist.',  'mean'),
+                (    'Struct. boundary NN dist.',   'std'),
+                (    'Struct. boundary NN dist.',   'min'),
+                (    'Struct. boundary NN dist.',    '5%'),
+                (    'Struct. boundary NN dist.',   '25%'),
+                (    'Struct. boundary NN dist.',   '50%'),
+                (    'Struct. boundary NN dist.',   '75%'),
+                (    'Struct. boundary NN dist.',   '95%'),
+                (    'Struct. boundary NN dist.',   'max'),
+                (  'Dist. from struct. centroid', 'count'),
+                (  'Dist. from struct. centroid',  'mean'),
+                (  'Dist. from struct. centroid',   'std'),
+                (  'Dist. from struct. centroid',   'min'),
+                (  'Dist. from struct. centroid',    '5%'),
+                (  'Dist. from struct. centroid',   '25%'),
+                (  'Dist. from struct. centroid',   '50%'),
+                (  'Dist. from struct. centroid',   '75%'),
+                (  'Dist. from struct. centroid',   '95%'),
+                (  'Dist. from struct. centroid',   'max'),
+                ('Dist. from struct. centroid X', 'count'),
+                ('Dist. from struct. centroid X',  'mean'),
+                ('Dist. from struct. centroid X',   'std'),
+                ('Dist. from struct. centroid X',   'min'),
+                ('Dist. from struct. centroid X',    '5%'),
+                ('Dist. from struct. centroid X',   '25%'),
+                ('Dist. from struct. centroid X',   '50%'),
+                ('Dist. from struct. centroid X',   '75%'),
+                ('Dist. from struct. centroid X',   '95%'),
+                ('Dist. from struct. centroid X',   'max'),
+                ('Dist. from struct. centroid Y', 'count'),
+                ('Dist. from struct. centroid Y',  'mean'),
+                ('Dist. from struct. centroid Y',   'std'),
+                ('Dist. from struct. centroid Y',   'min'),
+                ('Dist. from struct. centroid Y',    '5%'),
+                ('Dist. from struct. centroid Y',   '25%'),
+                ('Dist. from struct. centroid Y',   '50%'),
+                ('Dist. from struct. centroid Y',   '75%'),
+                ('Dist. from struct. centroid Y',   '95%'),
+                ('Dist. from struct. centroid Y',   'max'),
+                ('Dist. from struct. centroid Z', 'count'),
+                ('Dist. from struct. centroid Z',  'mean'),
+                ('Dist. from struct. centroid Z',   'std'),
+                ('Dist. from struct. centroid Z',   'min'),
+                ('Dist. from struct. centroid Z',    '5%'),
+                ('Dist. from struct. centroid Z',   '25%'),
+                ('Dist. from struct. centroid Z',   '50%'),
+                ('Dist. from struct. centroid Z',   '75%'),
+                ('Dist. from struct. centroid Z',   '95%'),
+                ('Dist. from struct. centroid Z',   'max')],
+            )
+    """
+
+
+
+
+    # Base pathology DF (already NA-dropped on benign/malignant/maybe malignant)
+
+    # Global BE stats per tissue
+    global_sum_to_one_df = cohort_global_sum_to_one_tissue_df
+
+    # Giant design matrix
+    pathology_validation_design_matrix_df = (
+        pathology_validation.build_pathology_with_spatial_radiomics_and_distances(
+            pathology_df=pathology_df,
+            global_sum_to_one_df=global_sum_to_one_df,
+            biopsy_basic_df=cohort_biopsy_basic_spatial_features_df,
+            radiomics_df=cohort_3d_radiomic_features_all_oar_dil_df,
+            distances_df=cohort_tissue_class_distances_global_df,
+            radiomics_feature_cols=None,   # or pick a subset
+            pivot_all_tissues=True,        # or False if you only want DIL BE columns
+        )
+    )
+
+    """
+    print(pathology_validation_design_matrix_df.columns.tolist())
+    ['Patient ID', 'Bx ID', 'Bx refnum', 'Bx index', 'benign', 'malignant', 'maybe malignant', 'DIL Global Mean BE', 'Periprostatic Global Mean BE', 'Prostatic Global Mean BE', 'Rectal Global Mean BE', 'Urethral Global Mean BE', 'DIL Global Min BE', 'Periprostatic Global Min BE', 'Prostatic Global Min BE', 'Rectal Global Min BE', 'Urethral Global Min BE', 'DIL Global Max BE', 'Periprostatic Global Max BE', 'Prostatic Global Max BE', 'Rectal Global Max BE', 'Urethral Global Max BE', 'DIL Global STD BE', 'Periprostatic Global STD BE', 'Prostatic Global STD BE', 'Rectal Global STD BE', 'Urethral Global STD BE', 'DIL Global SEM BE', 'Periprostatic Global SEM BE', 'Prostatic Global SEM BE', 'Rectal Global SEM BE', 'Urethral Global SEM BE', 'DIL Global Q05 BE', 'Periprostatic Global Q05 BE', 'Prostatic Global Q05 BE', 'Rectal Global Q05 BE', 'Urethral Global Q05 BE', 'DIL Global Q25 BE', 'Periprostatic Global Q25 BE', 'Prostatic Global Q25 BE', 'Rectal Global Q25 BE', 'Urethral Global Q25 BE', 'DIL Global Q50 BE', 'Periprostatic Global Q50 BE', 'Prostatic Global Q50 BE', 'Rectal Global Q50 BE', 'Urethral Global Q50 BE', 'DIL Global Q75 BE', 'Periprostatic Global Q75 BE', 'Prostatic Global Q75 BE', 'Rectal Global Q75 BE', 'Urethral Global Q75 BE', 'DIL Global Q95 BE', 'Periprostatic Global Q95 BE', 'Prostatic Global Q95 BE', 'Rectal Global Q95 BE', 'Urethral Global Q95 BE', 'DIL Global CI 95 BE (lower)', 'Periprostatic Global CI 95 BE (lower)', 'Prostatic Global CI 95 BE (lower)', 'Rectal Global CI 95 BE (lower)', 'Urethral Global CI 95 BE (lower)', 'DIL Global CI 95 BE (upper)', 'Periprostatic Global CI 95 BE (upper)', 'Prostatic Global CI 95 BE (upper)', 'Rectal Global CI 95 BE (upper)', 'Urethral Global CI 95 BE (upper)', 'Simulated bool', 'Simulated type', 'Length (mm)', 'Volume (mm3)', 'Voxel side length (mm)', 'Relative DIL ID', 'Relative DIL index', 'Relative prostate ID', 'Relative prostate index', 'Bx position in prostate LR', 'Bx position in prostate AP', 'Bx position in prostate SI', 'DIL Volume', 'DIL Surface area', 'DIL Surface area to volume ratio', 'DIL Sphericity', 'DIL Compactness 1', 'DIL Compactness 2', 'DIL Spherical disproportion', 'DIL Maximum 3D diameter', 'DIL PCA major', 'DIL PCA minor', 'DIL PCA least', 'DIL PCA eigenvector major', 'DIL PCA eigenvector minor', 'DIL PCA eigenvector least', 'DIL Major axis (equivalent ellipse)', 'DIL Minor axis (equivalent ellipse)', 'DIL Least axis (equivalent ellipse)', 'DIL Elongation', 'DIL Flatness', 'DIL L/R dimension at centroid', 'DIL A/P dimension at centroid', 'DIL S/I dimension at centroid', 'DIL S/I arclength', 'DIL DIL centroid (X, prostate frame)', 'DIL DIL centroid (Y, prostate frame)', 'DIL DIL centroid (Z, prostate frame)', 'DIL DIL centroid distance (prostate frame)', 'DIL DIL prostate sextant (LR)', 'DIL DIL prostate sextant (AP)', 'DIL DIL prostate sextant (SI)', 'Prostate Volume', 'Prostate Surface area', 'Prostate Surface area to volume ratio', 'Prostate Sphericity', 'Prostate Compactness 1', 'Prostate Compactness 2', 'Prostate Spherical disproportion', 'Prostate Maximum 3D diameter', 'Prostate PCA major', 'Prostate PCA minor', 'Prostate PCA least', 'Prostate PCA eigenvector major', 'Prostate PCA eigenvector minor', 'Prostate PCA eigenvector least', 'Prostate Major axis (equivalent ellipse)', 'Prostate Minor axis (equivalent ellipse)', 'Prostate Least axis (equivalent ellipse)', 'Prostate Elongation', 'Prostate Flatness', 'Prostate L/R dimension at centroid', 'Prostate A/P dimension at centroid', 'Prostate S/I dimension at centroid', 'Prostate S/I arclength', 'Prostate DIL centroid (X, prostate frame)', 'Prostate DIL centroid (Y, prostate frame)', 'Prostate DIL centroid (Z, prostate frame)', 'Prostate DIL centroid distance (prostate frame)', 'Prostate DIL prostate sextant (LR)', 'Prostate DIL prostate sextant (AP)', 'Prostate DIL prostate sextant (SI)', 'DIL NN dist mean', 'DIL centroid dist mean', 'Prostate NN dist mean', 'Prostate centroid dist mean', 'Rectum NN dist mean', 'Rectum centroid dist mean', 'Urethra NN dist mean', 'Urethra centroid dist mean', 'Prostate mean dimension at centroid', 'BX_to_prostate_centroid_distance_norm_mean_dim']
+    """
+
+    # Add normalized distance metrics (by DIL max 3D diameter) to design matrix
+    denom = pathology_validation_design_matrix_df["DIL Maximum 3D diameter"].replace(0, np.nan)
+
+    pathology_validation_design_matrix_df[
+        "DIL centroid dist mean norm max 3D diam"
+    ] = pathology_validation_design_matrix_df["DIL centroid dist mean"] / denom
+
+
+    """
+    # --------------------------------------------------------------
+    # Minimal exploratory pathology validation (optional)
+    # --------------------------------------------------------------
+
+    # Quick sanity check of pathology patterns
+    pathology_validation.summarize_pathology_patterns(
+        pathology_validation_design_matrix_df
+    )
+
+    # Choose endpoint and predictor here so you can easily flip them:
+    pathology_endpoint = "malignant_vs_not_malignant"
+    # pathology_endpoint = "any_concerning_vs_pure_benign"
+
+    #pathology_predictor_col = "DIL Global Mean BE"
+    # Try alternatives:
+    pathology_predictor_col = "DIL Global Max BE"
+    # pathology_predictor_col = "DIL Global Q50 BE"
+    # etc.
+
+    pathology_analysis_df = pathology_validation.prepare_pathology_analysis_df(
+        pathology_validation_design_matrix_df,
+        endpoint=pathology_endpoint,
+        predictor_col=pathology_predictor_col,
+        filter_simulated=True,
+    )
+
+    pathology_results = pathology_validation.run_pathology_association(
+        pathology_analysis_df,
+        standardize_predictor=True,   # set False if you prefer raw units
+        adjust_for_length=True,       # include core length as covariate
+        verbose=True,
+    )
+
+
+
+    # Optional: plotting
+    pathology_plots_dir = output_dir.joinpath("pathology_validation")
+    os.makedirs(pathology_plots_dir, exist_ok=True)
+
+    plot_prefix = pathology_plots_dir.joinpath("DIL_Global_Max_BE").as_posix()
+    pathology_validation.plot_pathology_predictor(
+        pathology_analysis_df,
+        use_standardized=False,   # or True if you want z-scores
+        save_prefix=plot_prefix,
+    )
+
+    """
+
+
+
+    # Define predictors to scan
+    predictor_cols = [
+        # Your main DIL metrics
+        "DIL Global Max BE",
+        "DIL Global Mean BE",
+
+        # Distances
+        "BX_to_prostate_centroid_distance_norm_mean_dim",
+        "DIL centroid dist mean norm max 3D diam",
+        "DIL centroid dist mean",
+        "Prostate centroid dist mean",
+        "Rectum centroid dist mean",
+        "Urethra centroid dist mean",
+        "DIL NN dist mean",
+        "Prostate NN dist mean",
+        "Rectum NN dist mean",
+        "Urethra NN dist mean",
+
+        # DIL radiomics
+        "DIL Volume",
+        "DIL Surface area",
+        "DIL Surface area to volume ratio",
+        "DIL Sphericity",
+        "DIL Compactness 1",
+        "DIL Compactness 2",
+        "DIL Spherical disproportion",
+        "DIL Maximum 3D diameter",
+        "DIL PCA major",
+        "DIL PCA minor",
+        "DIL PCA least",
+
+        # Prostate radiomics
+        "Prostate Volume",
+        "Prostate Surface area",
+        "Prostate Surface area to volume ratio",
+        "Prostate Sphericity",
+        "Prostate Compactness 1",
+        "Prostate Compactness 2",
+        "Prostate Spherical disproportion",
+        "Prostate Maximum 3D diameter",
+        "Prostate PCA major",
+        "Prostate PCA minor",
+        "Prostate PCA least",
+    ]
+
+    pathology_plots_dir = output_dir.joinpath("pathology_validation")
+    os.makedirs(pathology_plots_dir, exist_ok=True)
+
+
+
+    # Path where you want the summary table
+    feature_scan_csv = pathology_plots_dir.joinpath("pathology_feature_scan.csv")
+
+    feature_scan_df = pathology_validation.scan_pathology_predictors(
+        design_df=pathology_validation_design_matrix_df,
+        predictor_cols=predictor_cols,
+        endpoint="malignant_vs_not_malignant",
+        filter_simulated=True,
+        standardize_predictor=True,
+        adjust_for_length=False,  # simpler for a first pass
+        output_csv_path=feature_scan_csv,
+        verbose=False,
+    )
+
+
+    ########## pathology validation complete
+
+
+
 
 
 
@@ -221,6 +532,18 @@ def main():
         del df
     # Concatenate all the dataframes into one dataframe
     all_containment_and_distances_df = pd.concat(all_containment_and_distances_dfs_list, ignore_index=True)
+    """ NOTE: The columns of the dataframe are:
+    print(all_containment_and_distances_df.columns) = 
+        Index(['Patient ID', 'Bx ID', 'Bx index', 'Relative structure ROI',
+            'Relative structure type', 'Relative structure index',
+            'Original pt index', 'Pt contained bool', 'Trial num',
+            'Relative struct input index', 'Struct. boundary NN dist.',
+            'Dist. from struct. centroid', 'Dist. from struct. centroid X',
+            'Dist. from struct. centroid Y', 'Dist. from struct. centroid Z',
+            'X (Bx frame)', 'Y (Bx frame)', 'Z (Bx frame)', 'Voxel index',
+            'Voxel begin (Z)', 'Voxel end (Z)'],
+            dtype='object')
+            """
     del all_containment_and_distances_dfs_list
     # Print the shape of the dataframe
     print(f"Shape of all containment and distances dataframe: {all_containment_and_distances_df.shape}")
@@ -252,10 +575,7 @@ def main():
 
 
 
-    ## Create output directory
-    # Output directory 
-    output_dir = Path(__file__).parents[0].joinpath("output_data")
-    os.makedirs(output_dir, exist_ok=True)
+    
 
 
     ### Get unqiue patient IDs
@@ -527,6 +847,8 @@ def main():
     os.makedirs(output_fig_directory, exist_ok=True)
     cohort_output_figures_dir = output_fig_directory.joinpath("cohort_output_figures")
     os.makedirs(cohort_output_figures_dir, exist_ok=True)
+    pt_sp_figures_dir = output_fig_directory.joinpath("patient_specific_output_figures")
+    os.makedirs(pt_sp_figures_dir, exist_ok=True)
 
 
 
@@ -616,6 +938,70 @@ def main():
                                                     structs_referenced_dict,
                                                     default_exterior_tissue
                                                     )
+
+
+
+
+    # 4. individual patient dose ridgeline plots
+    print("--------------------------------------------------")
+    print("Figures: Individual patient distances ridgeline plots...")
+    print("--------------------------------------------------")
+
+    if False:
+        print("Skipping!")
+    else:
+        for patient_id, bx_index in patient_id_and_bx_index_pairs:
+            # Create a directory for the patient
+            patient_dir = pt_sp_figures_dir.joinpath(patient_id)
+            os.makedirs(patient_dir, exist_ok=True)
+
+            # global
+            bx_struct_roi = cohort_biopsy_basic_spatial_features_df[(cohort_biopsy_basic_spatial_features_df['Patient ID'] == patient_id) & (cohort_biopsy_basic_spatial_features_df['Bx index'] == bx_index)]['Bx ID'].values[0]
+        
+            # Get the specific biopsy data
+            sp_bx_all_containment_and_distances_df = all_containment_and_distances_df[(all_containment_and_distances_df['Patient ID'] == patient_id) & (all_containment_and_distances_df['Bx index'] == bx_index)]
+            sp_bx_tissue_class_distances_global_by_voxel_df = cohort_tissue_class_distances_global_by_voxel_df[(cohort_tissue_class_distances_global_by_voxel_df['Patient ID'] == patient_id) & (cohort_tissue_class_distances_global_by_voxel_df['Bx index'] == bx_index)]
+
+
+            svg_image_height = 1080
+            svg_image_width = 1920
+            cancer_tissue_label = 'DIL'
+            dpi = 300
+            production_plots.plot_distance_ridges_for_single_biopsy(
+                                sp_bx_all_containment_and_distances_df,
+                                sp_bx_tissue_class_distances_global_by_voxel_df,
+                                None,
+                                patient_dir,
+                                "Biopsy Voxel-Wise Distances Ridgeline Plot",
+                                "distance",
+                                cancer_tissue_label,
+                                fig_scale=1.0,
+                                dpi=300,
+                                add_text_annotations=True,
+                                x_label="Distance (mm)",
+                                y_label="Biopsy Axial Dimension (mm)"
+                            )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     ### Find distances statistics (START)
 

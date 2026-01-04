@@ -10,6 +10,12 @@ import misc_tools
 import plotly.express as px
 import plotting_funcs
 import kaleido # imported for exporting image files, although not referenced it is required
+from matplotlib.lines import Line2D
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+import os
+
 
 def production_plot_cohort_sum_to_one_all_biopsy_voxels_binom_est_histogram_by_tissue_class(dataframe,
                                        svg_image_width,
@@ -665,7 +671,7 @@ def production_plot_sum_to_one_tissue_class_nominal_plotly(multi_structure_mc_su
                     )
                 ),
                 tickfont=dict(
-                    size=30,
+                    size=40,
                 )
                 ),
             yaxis=dict(
@@ -677,7 +683,7 @@ def production_plot_sum_to_one_tissue_class_nominal_plotly(multi_structure_mc_su
                     )
                 ),
                 tickfont=dict(
-                    size=30,
+                    size=40,
                     color="black"
                 ),
                 categoryorder='array',  # Set custom order
@@ -691,6 +697,9 @@ def production_plot_sum_to_one_tissue_class_nominal_plotly(multi_structure_mc_su
             height=400,  # Adjust the overall height of the plot to flatten it
             legend_title_text='Tissue class'  # Set legend title
         )
+
+        fig.update_xaxes(range=[-0.5, df["Z (Bx frame)"].max() +0.5])
+
 
         fig = plotting_funcs.fix_plotly_grid_lines(fig, y_axis = True, x_axis = True)
         fig.update_layout(
@@ -725,3 +734,161 @@ def production_plot_sum_to_one_tissue_class_nominal_plotly(multi_structure_mc_su
     html_dose_fig_name = bx_sp_plot_name_string+'.html'
     html_dose_fig_file_path = patient_sp_output_figures_dir.joinpath(html_dose_fig_name)
     fig.write_html(html_dose_fig_file_path) 
+
+
+
+def plot_distance_ridges_for_single_biopsy(
+    distance_df,
+    stats_df,
+    binom_df,
+    save_dir,
+    fig_title_suffix,
+    fig_name_suffix,
+    cancer_tissue_label,
+    fig_scale=1.0,
+    dpi=300,
+    add_text_annotations=True,
+    x_label="Distance (mm)",
+    y_label="Biopsy Axial Dimension (mm)"
+):
+
+    plt.ioff()
+    sns.set_theme(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
+
+    for (struct_idx, struct_type) in distance_df[['Relative structure index', 'Relative structure type']].drop_duplicates().itertuples(index=False):
+        sub_df = distance_df[(distance_df['Relative structure index'] == struct_idx) & (distance_df['Relative structure type'] == struct_type)]
+        sub_stats_df = stats_df[(stats_df[('Relative structure index', '')] == struct_idx) & (stats_df[('Relative structure type', '')] == struct_type)]
+        struct_name = sub_df['Relative structure ROI'].iloc[0]
+
+        for dist_col in ['Struct. boundary NN dist.', 'Dist. from struct. centroid']:
+            df = sub_df.copy()
+            df = df.astype({"Voxel index": int, dist_col: float})
+
+            coloring_enabled = binom_df is not None
+            if coloring_enabled:
+                binom_df_filtered = binom_df[binom_df["Tissue class"] == cancer_tissue_label]
+                cmap = sns.color_palette("viridis", as_cmap=True)
+                norm = Normalize(vmin=0, vmax=1)
+                sm = ScalarMappable(norm=norm, cmap=cmap)
+
+            patient_id = df['Patient ID'].iloc[0]
+            bx_index = df['Bx index'].iloc[0]
+            bx_id = df['Bx ID'].iloc[0]
+            voxel_ids = df['Voxel index'].unique()
+
+            def annotate_and_fill(x, color, label, **kwargs):
+                label_val = float(label)
+                voxel_stats = sub_stats_df[
+                    (sub_stats_df[('Voxel index', '')] == label_val) &
+                    (sub_stats_df[('Patient ID', '')] == patient_id) &
+                    (sub_stats_df[('Bx index', '')] == bx_index)
+                ].iloc[0]
+
+                # get nominal from Trial num == 0 from the distance_df
+                nominal = df[(df['Voxel index'] == label_val) & (df['Trial num'] == 0)][dist_col].mean()
+                mean = voxel_stats[(dist_col, 'mean')]
+                std = voxel_stats[(dist_col, 'std')]
+                z_start = voxel_stats[('Voxel begin (Z)', '')]
+                z_end = voxel_stats[('Voxel end (Z)', '')]
+                q_vals = [voxel_stats[(dist_col, f'{q}%')] for q in [5, 25, 50, 75, 95]]
+
+                ax = plt.gca()
+                kde = gaussian_kde(x)
+                x_grid = np.linspace(x.min(), x.max(), 1000)
+                y_vals = kde(x_grid)
+                y_scaled = y_vals / np.max(y_vals) if np.max(y_vals) > 0 else y_vals
+
+                if coloring_enabled:
+                    binom_mean = binom_df_filtered[
+                        (binom_df_filtered['Voxel index'] == label_val) &
+                        (binom_df_filtered['Patient ID'] == patient_id) &
+                        (binom_df_filtered['Bx index'] == bx_index)
+                    ]["Binomial estimator"].mean()
+                    fill_color = cmap(norm(binom_mean))
+                else:
+                    fill_color = "gray"
+
+                ax.fill_between(x_grid, y_scaled, alpha=0.5, color=fill_color)
+                ax.axvline(x=mean, color='orange', linestyle='-', linewidth=1)
+                ax.axvline(x=nominal, color='red', linestyle='-', linewidth=1)
+                for qv in q_vals:
+                    ax.axvline(x=qv, color='gray', linestyle='--', linewidth=1)
+
+                if add_text_annotations:
+                    annotation = (
+                        f"Segment: ({z_start:.1f}, {z_end:.1f}) mm"
+                        + (f" | Tumor score: {binom_mean:.2f}" if coloring_enabled else "")
+                        + f"\nMean: {mean:.2f} mm | SD: {std:.2f} | Nominal: {nominal:.2f}"
+                    )
+                    ax.text(1.02, 0.5, annotation, transform=ax.transAxes, ha='left', va='center', fontsize=8, color=color)
+
+                ax.set_yticks([0.5])
+                ax.set_ylim(0, 1.1)
+                ax.tick_params(axis='x', which='both', labelbottom=True, length=3, width=0.8)
+
+            max_q95 = sub_stats_df[(dist_col, '95%')].max()
+            min_q05 = sub_stats_df[(dist_col, '5%')].min()
+            palette = {v: 'black' for v in voxel_ids}
+
+            g = sns.FacetGrid(df, row='Voxel index', hue='Voxel index', aspect=15, height=1, palette=palette)
+            g.map(annotate_and_fill, dist_col)
+
+            sorted_voxels = sorted(voxel_ids)
+            for i, ax in enumerate(g.axes.flat):
+                z_start = sub_stats_df[(sub_stats_df[('Voxel index', '')] == sorted_voxels[i]) &
+                                       (sub_stats_df[('Patient ID', '')] == patient_id) &
+                                       (sub_stats_df[('Bx index', '')] == bx_index)]['Voxel begin (Z)'].values[0]
+                z_end = sub_stats_df[(sub_stats_df[('Voxel index', '')] == sorted_voxels[i]) &
+                                     (sub_stats_df[('Patient ID', '')] == patient_id) &
+                                     (sub_stats_df[('Bx index', '')] == bx_index)]['Voxel end (Z)'].values[0]
+                tick_label = f"V{sorted_voxels[i]} ({z_start:.1f}–{z_end:.1f})"
+                ax.set_yticks([0.5])
+                ax.set_yticklabels([tick_label], fontsize=9)
+                ax.set_ylim(0, 1.1)
+                ax.tick_params(axis='y', labelsize=9)
+                ax.grid(True, which='both', axis='x', linestyle='-', color='gray', linewidth=0.5)
+                ax.set_axisbelow(True)
+
+            g.set(xlim=(min_q05, max_q95))
+            g.set_titles("")
+            g.set_axis_labels(x_label, "")
+            g.fig.text(0.04, 0.5, y_label, va='center', rotation='vertical', fontsize=11)
+
+            if coloring_enabled:
+                g.fig.text(0.87, 0.5, 'Tumor tissue score', va='center', rotation='vertical', fontsize=10)
+                cbar_ax = g.fig.add_axes([0.88, 0.2, 0.015, 0.6])
+                g.fig.colorbar(sm, cax=cbar_ax, orientation='vertical')
+
+            g.fig.subplots_adjust(left=0.23, right=0.85 if coloring_enabled else 0.93, top=0.9, bottom=0.05)
+
+            legend_lines = [
+                Line2D([0], [0], color='orange', lw=1, label='Mean Distance'),
+                Line2D([0], [0], color='red', lw=1, label='Nominal Distance'),
+                Line2D([0], [0], color='gray', lw=1, linestyle='--', label='Quantiles (5%, 25%, 50%, 75%, 95%)')
+            ]
+            g.fig.legend(
+                handles=legend_lines,
+                loc='upper right',
+                bbox_to_anchor=(1.25, 0.985),
+                frameon=True,
+                facecolor='white',
+                fontsize=9
+            )
+
+            g.fig.text(0.07, 0.93, f"Patient ID: {patient_id} | Bx ID: {bx_id} | Structure: {struct_name}",
+                       ha='left', fontsize=9, bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3'))
+
+            plt.suptitle(f"{fig_title_suffix} - {dist_col} ({struct_name})", fontsize=12, fontweight='bold', y=0.98)
+
+            fig_h = 1.0 * len(voxel_ids) * fig_scale
+            fig_w = 10.0 * fig_scale
+            g.fig.set_size_inches(fig_w, fig_h)
+
+            filename_suffix = f"{fig_name_suffix}_{struct_name.replace(' ', '_')}_{dist_col.replace(' ', '_')}"
+            save_path = os.path.join(save_dir, f"{patient_id}_{bx_id}_ridge_plot_{filename_suffix}.svg")
+            g.fig.savefig(save_path, format='svg', dpi=dpi, bbox_inches='tight')
+
+            png_path = save_path.replace(".svg", ".png")
+            g.fig.savefig(png_path, format='png', dpi=dpi, bbox_inches='tight')
+
+            plt.close(g.fig)
