@@ -15,7 +15,7 @@ In short:
 If you use this code or the GPU-based point-in-polygon algorithm in a
 scientific publication, please cite:
 
-> Muscat, M. (2025). biopsylocalization-python. Zenodo. DOI: https://doi.org/10.5281/zenodo.15700661
+> Muscat, M. (2025). tissue_class_analysis_1. Zenodo. DOI: https://doi.org/10.5281/zenodo.18814160
 
 For commercial licensing inquiries, please contact:
 `matthew.muscat@mail.mcgill.ca`.

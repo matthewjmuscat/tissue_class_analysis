@@ -7,3 +7,8 @@
 *.csv
 *.pdf
 output_data/
+.vscode/
+.VSCodeCounter/
+.python-version
+__pycache__/
+.bashrc.swp
