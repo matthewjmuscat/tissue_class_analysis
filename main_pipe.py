@@ -820,7 +820,7 @@ def main():
             cohort_global_sum_to_one_tissue_df,
             save_csv=True,
             output_dir=statistical_tests_1_dir,
-            all_output_filename='global_tissue_scores_statistics_all_patients.csv',
+            all_output_filename='global_tissue_scores_statistics_all_patients_all_biopsies.csv',
             stratify_by_simulated_type=True,
         )
     )
