@@ -190,43 +190,149 @@ def production_plot_cohort_sum_to_one_all_biopsy_voxels_binom_est_histogram_by_t
 
 
 
-def cohort_global_scores_boxplot_by_bx_type(cohort_mc_sum_to_one_global_scores_dataframe,
-                                 general_plot_name_string,
-                                 cohort_output_figures_dir):
+def cohort_global_scores_boxplot_by_bx_type(
+    cohort_mc_sum_to_one_global_scores_dataframe,
+    general_plot_name_string,
+    cohort_output_figures_dir,
+    statistic_label_map=None,
+    plot_title="Core-level Tissue Score Distributions by Tissue Class",
+    publication_style=True,
+):
+    """
+    Plot cohort-level boxplots for core-level summary scores by tissue class.
 
-    df = cohort_mc_sum_to_one_global_scores_dataframe
+    Parameters
+    ----------
+    cohort_mc_sum_to_one_global_scores_dataframe : pd.DataFrame
+        Dataframe containing the global score columns and grouping columns.
+    general_plot_name_string : str
+        Output figure filename stem.
+    cohort_output_figures_dir : Path | str
+        Output directory for figure export.
+    statistic_label_map : dict | None
+        Optional mapping from source score columns to legend labels.
+    plot_title : str
+        Figure-level title.
+    publication_style : bool
+        If True, apply cleaner paper-oriented styling defaults.
+    """
+    if not isinstance(cohort_output_figures_dir, Path):
+        cohort_output_figures_dir = Path(cohort_output_figures_dir)
+    cohort_output_figures_dir.mkdir(parents=True, exist_ok=True)
 
-    # Melt the DataFrame to bring mean, min, and max into a single column for easier plotting
-    df_melted = pd.melt(df, id_vars=['Tissue class', 'Simulated type'], 
-                            value_vars=['Global Min BE', 'Global Mean BE', 'Global Max BE', 'Global STD BE'], 
-                            var_name='Statistic', value_name='Binomial Estimator')
+    df = cohort_mc_sum_to_one_global_scores_dataframe.copy()
 
-    # Create a grouped boxplot using seaborn with faceting by 'Simulated type'
-    g = sns.catplot(x='Tissue class', y='Binomial Estimator', hue='Statistic', 
-                    col='Simulated type', data=df_melted, kind='box', 
-                    palette="Set2", height=6, aspect=1.5)
+    value_vars = ["Global Min BE", "Global Mean BE", "Global Max BE", "Global STD BE"]
+    default_statistic_label_map = {
+        "Global Min BE": r"Core-level Min   $\min(\mathcal{P}_i)$",
+        "Global Mean BE": r"Core-level Mean   $\langle \mathcal{P}_i \rangle$",
+        "Global Max BE": r"Core-level Max   $\max(\mathcal{P}_i)$",
+        "Global STD BE": r"Core-level SD   $\sigma(\mathcal{P}_i)$",
+    }
 
-    # Set y-axis limits to be between 0 and 1
+    merged_label_map = default_statistic_label_map.copy()
+    if statistic_label_map is not None:
+        merged_label_map.update(statistic_label_map)
+
+    # Melt into long format and map source column names to publication labels.
+    df_melted = pd.melt(
+        df,
+        id_vars=["Tissue class", "Simulated type"],
+        value_vars=value_vars,
+        var_name="Statistic",
+        value_name="Multinomial Estimator",
+    )
+    df_melted["Statistic Label"] = (
+        df_melted["Statistic"].map(merged_label_map).fillna(df_melted["Statistic"])
+    )
+
+    hue_order = [merged_label_map.get(stat_name, stat_name) for stat_name in value_vars]
+    palette = {
+        hue_order[0]: "#009E73",  # green
+        hue_order[1]: "#E69F00",  # orange
+        hue_order[2]: "#0072B2",  # blue
+        hue_order[3]: "#CC79A7",  # magenta
+    }
+
+    if publication_style:
+        with sns.axes_style("whitegrid"), sns.plotting_context("paper"):
+            g = sns.catplot(
+                x="Tissue class",
+                y="Multinomial Estimator",
+                hue="Statistic Label",
+                hue_order=hue_order,
+                col="Simulated type",
+                data=df_melted,
+                kind="box",
+                palette=palette,
+                linewidth=1.0,
+                showfliers=True,
+                flierprops={
+                    "marker": "o",
+                    "markersize": 3,
+                    "markerfacecolor": "white",
+                    "markeredgecolor": "0.35",
+                    "alpha": 0.8,
+                },
+                height=5.0,
+                aspect=1.25,
+            )
+    else:
+        g = sns.catplot(
+            x="Tissue class",
+            y="Multinomial Estimator",
+            hue="Statistic Label",
+            hue_order=hue_order,
+            col="Simulated type",
+            data=df_melted,
+            kind="box",
+            palette=palette,
+            linewidth=1.0,
+            showfliers=True,
+            flierprops={
+                "marker": "o",
+                "markersize": 3,
+                "markerfacecolor": "white",
+                "markeredgecolor": "0.35",
+                "alpha": 0.8,
+            },
+            height=6.0,
+            aspect=1.5,
+        )
+
     g.set(ylim=(0, 1))
+    g.set_axis_labels("Tissue Class", "Multinomial Estimator")
+    g.set_titles("Simulation Type: {col_name}")
 
-    # Add horizontal grid lines
-    g.set_axis_labels("Tissue Class", "Binomial Estimator")
     for ax in g.axes.flat:
-        ax.grid(True, which='both', axis='y')  # Add horizontal grid lines to each subplot
+        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.6, alpha=0.7)
+        ax.set_axisbelow(True)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_yticks(np.linspace(0, 1, 6))
+        for tick in ax.get_xticklabels():
+            tick.set_rotation(45)
+            tick.set_ha("right")
 
-    # Customize the plot for better aesthetics
-    g.set_titles("Simulated Type: {col_name}")
-    g.fig.suptitle('Boxplots of Global Mean, Min, and Max (sum-to-one) Values by Tissue Class', y=1.02, fontsize=12)
-    g.set_xticklabels(rotation=45)
+    g.fig.suptitle(plot_title, y=0.99, fontsize=14 if publication_style else 12)
+    g.fig.subplots_adjust(top=0.86 if publication_style else 0.9, bottom=0.20)
+
+    if g._legend is not None:
+        g._legend.set_title("Statistic")
+        if publication_style:
+            g._legend.set_bbox_to_anchor((1.02, 0.98))
+            if hasattr(g._legend, "set_loc"):
+                g._legend.set_loc("upper left")
+            g._legend.get_frame().set_alpha(1.0)
+            g._legend.get_frame().set_edgecolor("0.2")
+
     plt.tight_layout()
 
-    # Save the figure
-    svg_dose_fig_name = general_plot_name_string + '.svg'
+    svg_dose_fig_name = general_plot_name_string + ".svg"
     svg_dose_fig_file_path = cohort_output_figures_dir.joinpath(svg_dose_fig_name)
-    g.savefig(svg_dose_fig_file_path, format='svg')
+    g.savefig(svg_dose_fig_file_path, format="svg", bbox_inches="tight")
 
-    # Close the figure to release memory
-    plt.close(g.fig)  # Ensure the figure is closed properly
+    plt.close(g.fig)
 
 
 

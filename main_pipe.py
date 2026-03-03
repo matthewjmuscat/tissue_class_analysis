@@ -873,9 +873,18 @@ def main():
 
     # 2. cohort sum to one boxplot global scores
     general_plot_name_string = 'cohort - sum-to-one_boxplot_global_scores'
+    core_level_statistic_label_map = {
+        "Global Min BE": r"Core-level Min   $\min(\mathcal{P}_i)$",
+        "Global Mean BE": r"Core-level Mean   $\langle \mathcal{P}_i \rangle$",
+        "Global Max BE": r"Core-level Max   $\max(\mathcal{P}_i)$",
+        "Global STD BE": r"Core-level SD   $\sigma(\mathcal{P}_i)$",
+    }
     production_plots.cohort_global_scores_boxplot_by_bx_type(cohort_global_sum_to_one_tissue_df,
                                  general_plot_name_string,
-                                 cohort_output_figures_dir)
+                                 cohort_output_figures_dir,
+                                 statistic_label_map=core_level_statistic_label_map,
+                                 plot_title='Core-level Mean, Min, Max, and SD (sum-to-one) by Tissue Class',
+                                 publication_style=True)
 
 
 
