@@ -184,7 +184,16 @@ def paired_effect_size_analysis(df, tissue_types, effect_sizes, patient_id_col='
 
 
 
-def compute_global_tissue_scores_stats_across_all_biopsies(df):
+def compute_global_tissue_scores_stats_across_all_biopsies(
+    df,
+    save_csv=False,
+    output_dir=None,
+    all_output_filename='global_tissue_scores_statistics_all_patients.csv',
+    stratify_by_simulated_type=False,
+    simulated_type_col='Simulated type',
+    biopsy_key_cols=('Patient ID', 'Bx ID', 'Bx index'),
+    stratified_filename_prefix='global_tissue_scores_statistics_simulated_type',
+):
     """
     Compute boxplot summary statistics for global BE score columns for each tissue type.
     
@@ -211,51 +220,106 @@ def compute_global_tissue_scores_stats_across_all_biopsies(df):
     
     Parameters:
         df (pd.DataFrame): DataFrame with global BE scores and tissue type information.
-        
+        save_csv (bool): If True, save the "all patients" stats CSV.
+        output_dir (str | Path | None): Directory where CSV files are written when save_csv=True.
+        all_output_filename (str): Filename for the full-cohort stats CSV.
+        stratify_by_simulated_type (bool): If True and save_csv=True, also save one CSV per simulated type.
+        simulated_type_col (str): Column name containing simulated type labels.
+        biopsy_key_cols (tuple[str, ...]): Columns used to count unique biopsies for stratified filename metadata.
+        stratified_filename_prefix (str): Prefix used for stratified output filenames.
+
     Returns:
-        pd.DataFrame: A DataFrame containing the computed boxplot statistics.
+        pd.DataFrame: A DataFrame containing the computed boxplot statistics for all rows in df.
     """
-    # Define the global score columns of interest
-    global_cols = ['Global Mean BE', 'Global Min BE', 'Global Max BE', 'Global STD BE']
-    
-    stats_list = []
-    
-    # Group by tissue type
-    for tissue_class, group in df.groupby('Tissue class'):
-        for col in global_cols:
-            # Exclude missing values for computation
-            s = group[col].dropna()
-            if s.empty:
-                continue
-            mean_val = s.mean()
-            std_val = s.std()
-            q05 = s.quantile(0.05)
-            q25 = s.quantile(0.25)
-            q50 = s.quantile(0.50)
-            q75 = s.quantile(0.75)
-            q95 = s.quantile(0.95)
-            minimum = s.min()
-            maximum = s.max()
-            iqr = q75 - q25
-            lower_fence = q25 - 1.5 * iqr
-            upper_fence = q75 + 1.5 * iqr
-            
-            stats_list.append({
-                'Tissue class': tissue_class,
-                'Feature': col,
-                'Mean': mean_val,
-                'Std': std_val,
-                'Q05': q05,
-                'Q25': q25,
-                'Q50': q50,
-                'Q75': q75,
-                'Q95': q95,
-                'Min': minimum,
-                'Max': maximum,
-                'IQR': iqr,
-                'Lower Fence': lower_fence,
-                'Upper Fence': upper_fence
-            })
-            
-    stats_df = pd.DataFrame(stats_list)
+    def _compute_stats_table(df_in):
+        # Define the global score columns of interest
+        global_cols = ['Global Mean BE', 'Global Min BE', 'Global Max BE', 'Global STD BE']
+
+        stats_list = []
+
+        # Group by tissue type
+        for tissue_class, group in df_in.groupby('Tissue class'):
+            for col in global_cols:
+                # Exclude missing values for computation
+                s = group[col].dropna()
+                if s.empty:
+                    continue
+                mean_val = s.mean()
+                std_val = s.std()
+                q05 = s.quantile(0.05)
+                q25 = s.quantile(0.25)
+                q50 = s.quantile(0.50)
+                q75 = s.quantile(0.75)
+                q95 = s.quantile(0.95)
+                minimum = s.min()
+                maximum = s.max()
+                iqr = q75 - q25
+                lower_fence = q25 - 1.5 * iqr
+                upper_fence = q75 + 1.5 * iqr
+
+                stats_list.append({
+                    'Tissue class': tissue_class,
+                    'Feature': col,
+                    'Mean': mean_val,
+                    'Std': std_val,
+                    'Q05': q05,
+                    'Q25': q25,
+                    'Q50': q50,
+                    'Q75': q75,
+                    'Q95': q95,
+                    'Min': minimum,
+                    'Max': maximum,
+                    'IQR': iqr,
+                    'Lower Fence': lower_fence,
+                    'Upper Fence': upper_fence
+                })
+
+        return pd.DataFrame(stats_list)
+
+    def _sanitize_for_filename(value):
+        safe = ''.join(ch if str(ch).isalnum() else '_' for ch in str(value))
+        safe = safe.strip('_')
+        return safe if safe else 'unknown'
+
+    stats_df = _compute_stats_table(df)
+
+    if save_csv:
+        if output_dir is None:
+            raise ValueError("output_dir must be provided when save_csv=True.")
+
+        os.makedirs(output_dir, exist_ok=True)
+        stats_df.to_csv(os.path.join(output_dir, all_output_filename), index=True)
+
+        if stratify_by_simulated_type:
+            if simulated_type_col not in df.columns:
+                raise KeyError(
+                    f"Column '{simulated_type_col}' not found in dataframe; "
+                    "cannot stratify by simulated type."
+                )
+
+            available_biopsy_key_cols = [c for c in biopsy_key_cols if c in df.columns]
+            simulated_types = sorted(
+                df[simulated_type_col].dropna().unique().tolist(),
+                key=lambda x: str(x)
+            )
+
+            for sim_type in simulated_types:
+                strat_df = df[df[simulated_type_col] == sim_type]
+                strat_stats_df = _compute_stats_table(strat_df)
+
+                if available_biopsy_key_cols:
+                    n_biopsies = strat_df[available_biopsy_key_cols].drop_duplicates().shape[0]
+                else:
+                    n_biopsies = strat_df.shape[0]
+
+                sim_type_for_file = _sanitize_for_filename(sim_type)
+                strat_output_filename = (
+                    f"{stratified_filename_prefix}_{sim_type_for_file}"
+                    f"_nBiopsies_{n_biopsies}.csv"
+                )
+                strat_stats_df.to_csv(
+                    os.path.join(output_dir, strat_output_filename),
+                    index=True
+                )
+
     return stats_df

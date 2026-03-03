@@ -812,16 +812,20 @@ def main():
 
 
     ### Find statistics of global tissue scores (START)
-    cohort_global_sum_to_one_tissue_scores_statistics = statistical_tests_1_quick_and_dirty.compute_global_tissue_scores_stats_across_all_biopsies(cohort_global_sum_to_one_tissue_df)
-    # Print the statistics
-    print(cohort_global_sum_to_one_tissue_scores_statistics)
-    # Save the statistics to a CSV file
-    output_filename = 'global_tissue_scores_statistics_all_patients.csv'
     # use statistical_tests_1_dir
     statistical_tests_1_dir = output_dir.joinpath("statistical_tests_0")
     os.makedirs(statistical_tests_1_dir, exist_ok=True)
-    # Save the statistics to a CSV file
-    cohort_global_sum_to_one_tissue_scores_statistics.to_csv(statistical_tests_1_dir.joinpath(output_filename), index=True)
+    cohort_global_sum_to_one_tissue_scores_statistics = (
+        statistical_tests_1_quick_and_dirty.compute_global_tissue_scores_stats_across_all_biopsies(
+            cohort_global_sum_to_one_tissue_df,
+            save_csv=True,
+            output_dir=statistical_tests_1_dir,
+            all_output_filename='global_tissue_scores_statistics_all_patients_all_biopsies.csv',
+            stratify_by_simulated_type=True,
+        )
+    )
+    # Print the statistics
+    print(cohort_global_sum_to_one_tissue_scores_statistics)
     ### Find statistics of global tissue scores (END)
 
 
@@ -867,18 +871,58 @@ def main():
                                                                                     cohort_output_figures_dir,
                                                                                     bx_sample_pts_vol_element,
                                                                                     bin_width=0.05,
-                                                                                    bandwidth=0.1)
+                                                                                    bandwidth=0.1,
+                                                                                    split_by_simulated_type=True)
 
 
 
     # 2. cohort sum to one boxplot global scores
     general_plot_name_string = 'cohort - sum-to-one_boxplot_global_scores'
+    core_level_statistic_label_map = {
+        "Global Min BE": r"Core-level Min, $\min(\mathcal{P}_i)$",
+        "Global Mean BE": r"Core-level Mean, $\langle \mathcal{P}_i \rangle$",
+        "Global Max BE": r"Core-level Max, $\max(\mathcal{P}_i)$",
+        "Global STD BE": r"Core-level SD, $\sigma(\mathcal{P}_i)$",
+    }
     production_plots.cohort_global_scores_boxplot_by_bx_type(cohort_global_sum_to_one_tissue_df,
                                  general_plot_name_string,
-                                 cohort_output_figures_dir)
+                                 cohort_output_figures_dir,
+                                 statistic_label_map=core_level_statistic_label_map,
+                                 plot_title='Core-level Mean, Min, Max, and SD (sum-to-one) by Tissue Class',
+                                 split_by_simulated_type=True,
+                                 suppress_tissue_classes=["rectal", "urethral"],
+                                 remove_title=True,
+                                 legend_position="outside",
+                                axis_label_fontsize=16,
+                                x_tick_label_fontsize=14,
+                                y_tick_label_fontsize=14,
+                                x_tick_label_rotation=30,
+                                legend_fontsize=16,
+                                fig_width_in=11.0,
+                                fig_height_in=6.0,
+                                save_dpi=300,
+                                save_formats=["svg", "png", "pdf"])
 
-
-
+    tissue_types = ["DIL", 'Prostatic', 'Periprostatic', 'Urethral', 'Rectal']
+    # stratified mean-difference heatmaps by simulated type
+    production_plots.plot_effect_size_heatmap_stratified_by_simulated_type(
+        cohort_global_sum_to_one_tissue_df,
+        tissue_types,
+        cohort_output_figures_dir,
+        effect_size_key='mean_diff',
+        patient_id_col='Patient ID',
+        bx_index_col='Bx index',
+        value_col='Global Mean BE',
+        simulated_type_col='Simulated type',
+        filename_prefix='mean_diff_heatmap_simulated_type',
+        title_prefix='Effect size heatmap',
+        vmin=-1,
+        vmax=1,
+        axis_label_size=16,
+        tick_fontsize=14,
+        cbar_label_fontsize=16,
+        cbar_tick_fontsize=14,
+    )
 
 
     # 3. individual patient histograms of tissue scores by tissue type:
@@ -1089,6 +1133,7 @@ def main():
                                                   cbar_label_fontsize=16, 
                                                   cbar_tick_fontsize=14)
 
+    
 
 
 

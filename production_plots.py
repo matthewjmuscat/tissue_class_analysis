@@ -14,7 +14,9 @@ from matplotlib.lines import Line2D
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
+from matplotlib.patches import Patch
 import os
+import statistical_tests_1_quick_and_dirty
 
 
 def production_plot_cohort_sum_to_one_all_biopsy_voxels_binom_est_histogram_by_tissue_class(dataframe,
@@ -25,22 +27,14 @@ def production_plot_cohort_sum_to_one_all_biopsy_voxels_binom_est_histogram_by_t
                                        output_dir,
                                        bx_sample_pts_vol_element,
                                        bin_width=0.05,
-                                       bandwidth=0.1):
+                                       bandwidth=0.1,
+                                       split_by_simulated_type=False):
     
     plt.ioff()  # Turn off interactive plotting for batch figure generation
     
     # Deep copy the dataframe to prevent modifications to the original data
     df = copy.deepcopy(dataframe)
-    
-    # Get the list of unique tissue classes
-    tissue_classes = df['Tissue class'].unique()
-    
-    # Set up the figure and subplots for each tissue class
-    fig, axes = plt.subplots(len(tissue_classes), 1, figsize=(svg_image_width / dpi, svg_image_height / dpi), dpi=dpi, sharex=True)
-    
-    # Increase padding between subplots
-    fig.subplots_adjust(hspace=0.8)  # Adjust hspace to increase vertical padding
-    
+
     # Create color mappings for vertical lines
     line_colors = {
         'mean': 'orange',
@@ -53,180 +47,427 @@ def production_plot_cohort_sum_to_one_all_biopsy_voxels_binom_est_histogram_by_t
         'q95': 'cyan',
         'max density': 'magenta'
     }
-    
-    for ax, tissue_class in zip(axes, tissue_classes):
-        tissue_data = df[df['Tissue class'] == tissue_class]['Binomial estimator'].dropna()
-        
-        count = len(tissue_data)
-        ax.text(-0.3, 0.85, f'Num voxels: {count}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
-        ax.text(-0.3, 0.7, f'Kernel BW: {bandwidth}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
-        ax.text(-0.3, 0.55, f'Bin width: {bin_width}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
-        ax.text(-0.3, 0.4, f'Bx voxel volume (cmm): {bx_sample_pts_vol_element}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
+
+    def _sanitize_for_filename(value):
+        safe = ''.join(ch if str(ch).isalnum() else '_' for ch in str(value))
+        safe = safe.strip('_')
+        return safe if safe else 'unknown'
+
+    def _plot_single_df(df_subset, output_path, figure_title_suffix=None):
+        # Get the list of unique tissue classes
+        tissue_classes = df_subset['Tissue class'].dropna().unique()
+        if len(tissue_classes) == 0:
+            print("Cohort sum-to-one histogram plot | No tissue classes found; skipping plot.")
+            return
+
+        # Set up the figure and subplots for each tissue class
+        fig, axes = plt.subplots(
+            len(tissue_classes), 1,
+            figsize=(svg_image_width / dpi, svg_image_height / dpi),
+            dpi=dpi,
+            sharex=True
+        )
+        if len(tissue_classes) == 1:
+            axes = [axes]
+
+        # Increase padding between subplots
+        fig.subplots_adjust(hspace=0.8)  # Adjust hspace to increase vertical padding
+
+        for ax, tissue_class in zip(axes, tissue_classes):
+            tissue_data = df_subset[df_subset['Tissue class'] == tissue_class]['Binomial estimator'].dropna()
+
+            count = len(tissue_data)
+            ax.text(-0.3, 0.85, f'Num voxels: {count}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
+            ax.text(-0.3, 0.7, f'Kernel BW: {bandwidth}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
+            ax.text(-0.3, 0.55, f'Bin width: {bin_width}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
+            ax.text(-0.3, 0.4, f'Bx voxel volume (cmm): {bx_sample_pts_vol_element}', ha='left', va='top', transform=ax.transAxes, fontsize=14, color='black')
+
+            bins = np.arange(0, 1.05, bin_width)  # Create bins from 0 to 1 with steps of 0.05
+
+            # Plot normalized histogram with KDE
+            sns.histplot(tissue_data, bins=bins, kde=False, color='skyblue', stat='density', ax=ax)
+
+            # Calculate statistics
+            mean_val = tissue_data.mean()
+            min_val = tissue_data.min()
+            max_val = tissue_data.max()
+            quantiles = np.percentile(tissue_data, [5, 25, 50, 75, 95])
+
+            try:
+                # KDE fit for the binomial estimator values with specified bandwidth
+                kde = gaussian_kde(tissue_data, bw_method=bandwidth)
+                x_grid = np.linspace(0, 1, 1000)
+                y_density = kde(x_grid)
+                # Normalize the KDE so the area under the curve equals 1
+                y_density /= np.trapz(y_density, x_grid)  # Normalize over the x_grid range
+
+                max_density_value = x_grid[np.argmax(y_density)]
+
+                # Overlay KDE plot
+                ax.plot(x_grid, y_density, color='black', linewidth=1.5, label='KDE')
+
+            except np.linalg.LinAlgError as e:
+                # If there's a LinAlgError, it likely means all values are identical
+                print(f"Cohort sum-to-one histogram plot | Tissue class: {tissue_class} | LinAlgError: {e}")
+                constant_value = tissue_data.iloc[0] if len(tissue_data) > 0 else 0
+                ax.axvline(constant_value, color='black', linestyle='-', linewidth=1.5, label='All values are identical')
+                max_density_value = constant_value  # Set max density to the constant value for further annotations
+
+            except Exception as e:
+                # Handle any other unexpected errors and print/log the error message
+                print(f"Cohort sum-to-one histogram plot | Tissue class: {tissue_class} | An unexpected error occurred: {e}")
+                # Set a fallback for max density value or other defaults
+                constant_value = tissue_data.mean() if len(tissue_data) > 0 else 0
+                ax.axvline(constant_value, color='red', linestyle='-', linewidth=1.5, label='Fallback line due to error')
+                max_density_value = constant_value
+
+            # Add vertical lines for mean, min, max, quantiles, and max density
+            line_positions = {
+                'Mean': mean_val,
+                'Min': min_val,
+                'Max': max_val,
+                'Q05': quantiles[0],
+                'Q25': quantiles[1],
+                'Q50': quantiles[2],
+                'Q75': quantiles[3],
+                'Q95': quantiles[4],
+                'Max Density': max_density_value
+            }
+
+            # Sort line_positions by the x-values (positions of the vertical lines)
+            sorted_line_positions = sorted(line_positions.items(), key=lambda item: item[1])
+
+            # Initialize tracking variables to handle overlapping labels
+            last_x_val = None
+            last_label_y = 1.02  # Initial y position for text labels
+            stack_count = 0  # Track count of stacked labels
+            offset_x = 0  # Horizontal offset for secondary stacks
+
+            # Iterate over the sorted line positions to add vertical lines and labels
+            for label, x_val in sorted_line_positions:
+                color = line_colors.get(label.lower(), 'black')
+                ax.axvline(x_val, color=color, linestyle='--' if 'Q' in label else '-', label=label)
+
+                # Check for potential overlap and adjust y-position if needed
+                if last_x_val is not None and abs(x_val - last_x_val) < 0.1:
+                    last_label_y += 0.15
+                    stack_count += 1
+                else:
+                    # Reset position and stack count if no overlap
+                    last_label_y = 1.02
+                    stack_count = 0
+                    offset_x = 0
+
+                # Shift label to the right if stack count exceeds 3
+                if stack_count > 2:
+                    offset_x += 0.03  # Increment horizontal offset
+                    last_label_y = 1.02  # Reset y-position for the new stack
+                    stack_count = 0  # Reset stack count for the new column
+
+                # Add text above the plot area with adjusted x and y positions
+                ax.text(x_val + offset_x, last_label_y, f'{x_val:.2f}', color=color, ha='center', va='bottom',
+                        fontsize=14, transform=ax.get_xaxis_transform())
+
+                # Update last_x_val to current x_val
+                last_x_val = x_val
+
+            # Set x-axis limits to [0, 1] and enable grid lines
+            ax.set_xlim(0, 1)
+            ax.grid(True)
+            ax.set_xticks(np.arange(0, 1.1, 0.1))  # Sets vertical grid lines every 0.1
+            ax.set_xlabel('')
+            ax.tick_params(axis='x', labelsize=16)  # Adjust the number to your desired font size
+
+            # Add title and labels with adjusted title position
+            ax.set_title(f'{tissue_class}', fontsize=16, y=1, x=-0.15, ha='left')
+            ax.set_ylabel('Density', fontsize=16)
+            ax.tick_params(axis='y', labelsize=16)  # Adjust the number to your desired font size
+
+        # X-axis label and figure title
+        fig.text(0.5, 0.04, 'Multinomial Estimator', ha='center', fontsize=16)
+        base_title = 'Cohort - Normalized Multinomial Estimator Distribution by Tissue Class For All Biopsy Voxels'
+        if figure_title_suffix:
+            fig.suptitle(f'{base_title} ({figure_title_suffix})', fontsize=16)
+        else:
+            fig.suptitle(base_title, fontsize=16)
+
+        # Legend positioned outside the plot area with white background
+        handles, labels = axes[-1].get_legend_handles_labels()
+        legend = fig.legend(handles, labels, loc='center left', bbox_to_anchor=(0.95, 0.5), frameon=True)
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_edgecolor('black')
+
+        # Save the figure
+        fig.savefig(output_path, format='svg', dpi=dpi, bbox_inches='tight')
+
+        # Close the figure to free memory
+        plt.close(fig)
+
+    if split_by_simulated_type and 'Simulated type' in df.columns:
+        simulated_types = df['Simulated type'].dropna().unique()
+        for sim_type in simulated_types:
+            df_sim = df[df['Simulated type'] == sim_type]
+            suffix = _sanitize_for_filename(sim_type)
+            output_path = output_dir.joinpath(f"{histogram_plot_name_string} - simulated_type_{suffix}.svg")
+            _plot_single_df(df_sim, output_path, figure_title_suffix=f"Simulated type: {sim_type}")
+    else:
+        output_path = output_dir.joinpath(f"{histogram_plot_name_string}.svg")
+        _plot_single_df(df, output_path)
 
 
-        bins = np.arange(0, 1.05, bin_width)  # Create bins from 0 to 1 with steps of 0.05
 
-        # Plot normalized histogram with KDE
-        sns.histplot(tissue_data, bins=bins, kde=False, color='skyblue', stat='density', ax=ax)
 
-        # Calculate statistics
-        mean_val = tissue_data.mean()
-        min_val = tissue_data.min()
-        max_val = tissue_data.max()
-        quantiles = np.percentile(tissue_data, [5, 25, 50, 75, 95])
 
-        
-        try:
-            # KDE fit for the binomial estimator values with specified bandwidth
-            kde = gaussian_kde(tissue_data, bw_method=bandwidth)
-            x_grid = np.linspace(0, 1, 1000)
-            y_density = kde(x_grid)
-            # Normalize the KDE so the area under the curve equals 1
-            y_density /= np.trapz(y_density, x_grid)  # Normalize over the x_grid range
+def cohort_global_scores_boxplot_by_bx_type(
+    cohort_mc_sum_to_one_global_scores_dataframe,
+    general_plot_name_string,
+    cohort_output_figures_dir,
+    statistic_label_map=None,
+    plot_title="Core-level Tissue Score Distributions by Tissue Class",
+    split_by_simulated_type=True,
+    suppress_tissue_classes=None,
+    remove_title=False,
+    legend_position="inside",
+    axis_label_fontsize=16,
+    x_tick_label_fontsize=14,
+    y_tick_label_fontsize=14,
+    x_tick_label_rotation=45,
+    legend_fontsize=12,
+    fig_width_in=10.0,
+    fig_height_in=8.0,
+    save_dpi=300,
+    save_formats=None,
+):
+    """
+    Plot cohort-level boxplots for core-level summary scores by tissue class.
 
-            max_density_value = x_grid[np.argmax(y_density)]
+    Parameters
+    ----------
+    cohort_mc_sum_to_one_global_scores_dataframe : pd.DataFrame
+        Dataframe containing the global score columns and grouping columns.
+    general_plot_name_string : str
+        Output figure filename stem.
+    cohort_output_figures_dir : Path | str
+        Output directory for figure export.
+    statistic_label_map : dict | None
+        Optional mapping from source score columns to legend labels.
+    plot_title : str
+        Figure-level title.
+    split_by_simulated_type : bool
+        If True, save one figure per simulated type. If False, save one pooled figure.
+    suppress_tissue_classes : list[str] | None
+        Tissue classes to hide from plotting (case-insensitive), e.g. ["rectal", "urethral"].
+    remove_title : bool
+        If True, do not draw the figure title.
+    legend_position : str
+        Legend placement: "inside" (top-right in axes) or "outside" (to the right of axes).
+    axis_label_fontsize : int
+        Font size for x/y axis labels.
+    x_tick_label_fontsize : int
+        Font size for x-axis tick labels.
+    y_tick_label_fontsize : int
+        Font size for y-axis tick labels.
+    x_tick_label_rotation : float
+        Rotation angle for x-axis tick labels in degrees.
+    legend_fontsize : int
+        Font size for legend text.
+    fig_width_in : float
+        Fixed output figure width in inches.
+    fig_height_in : float
+        Fixed output figure height in inches.
+    save_dpi : int
+        DPI used for raster exports (e.g., PNG). Ignored by vector quality itself.
+    save_formats : list[str] | str | None
+        Output file formats to save (e.g., ["svg", "png", "pdf"]).
+        If None, defaults to ["svg"].
+    """
+    if not isinstance(cohort_output_figures_dir, Path):
+        cohort_output_figures_dir = Path(cohort_output_figures_dir)
+    cohort_output_figures_dir.mkdir(parents=True, exist_ok=True)
+    if fig_width_in <= 0 or fig_height_in <= 0 or save_dpi <= 0:
+        raise ValueError("fig_width_in, fig_height_in, and save_dpi must be positive.")
+    legend_position = str(legend_position).strip().lower()
+    if legend_position not in {"inside", "outside"}:
+        raise ValueError("legend_position must be either 'inside' or 'outside'.")
+    if save_formats is None:
+        normalized_save_formats = ["svg"]
+    elif isinstance(save_formats, str):
+        normalized_save_formats = [save_formats]
+    else:
+        normalized_save_formats = list(save_formats)
 
-            # Overlay KDE plot
-            ax.plot(x_grid, y_density, color='black', linewidth=1.5, label='KDE')
+    normalized_save_formats = [
+        str(fmt).lower().lstrip(".")
+        for fmt in normalized_save_formats
+        if str(fmt).strip()
+    ]
+    if not normalized_save_formats:
+        raise ValueError("save_formats must contain at least one format.")
 
-        except np.linalg.LinAlgError as e:
-            # If there's a LinAlgError, it likely means all values are identical
-            print(f"Cohort sum-to-one histogram plot | Tissue class: {tissue_class} | LinAlgError: {e}")
-            constant_value = tissue_data.iloc[0] if len(tissue_data) > 0 else 0
-            ax.axvline(constant_value, color='black', linestyle='-', linewidth=1.5, label='All values are identical')
-            max_density_value = constant_value  # Set max density to the constant value for further annotations
+    df = cohort_mc_sum_to_one_global_scores_dataframe.copy()
+    plot_aspect = fig_width_in / fig_height_in
 
-        except Exception as e:
-            # Handle any other unexpected errors and print/log the error message
-            print(f"Cohort sum-to-one histogram plot | Tissue class: {tissue_class} | An unexpected error occurred: {e}")
-            # Set a fallback for max density value or other defaults
-            constant_value = tissue_data.mean() if len(tissue_data) > 0 else 0
-            ax.axvline(constant_value, color='red', linestyle='-', linewidth=1.5, label='Fallback line due to error')
-            max_density_value = constant_value
+    value_vars = ["Global Min BE", "Global Mean BE", "Global Max BE", "Global STD BE"]
+    default_statistic_label_map = {
+        "Global Min BE": r"Core-level Min, $\min(\mathcal{P}_i)$",
+        "Global Mean BE": r"Core-level Mean, $\langle \mathcal{P}_i \rangle$",
+        "Global Max BE": r"Core-level Max, $\max(\mathcal{P}_i)$",
+        "Global STD BE": r"Core-level SD, $\sigma(\mathcal{P}_i)$",
+    }
 
-        # Add vertical lines for mean, min, max, quantiles, and max density
-        line_positions = {
-            'Mean': mean_val,
-            'Min': min_val,
-            'Max': max_val,
-            'Q05': quantiles[0],
-            'Q25': quantiles[1],
-            'Q50': quantiles[2],
-            'Q75': quantiles[3],
-            'Q95': quantiles[4],
-            'Max Density': max_density_value
-        }
-        
-                # Sort line_positions by the x-values (positions of the vertical lines)
-        sorted_line_positions = sorted(line_positions.items(), key=lambda item: item[1])
+    merged_label_map = default_statistic_label_map.copy()
+    if statistic_label_map is not None:
+        merged_label_map.update(statistic_label_map)
 
-        # Initialize tracking variables to handle overlapping labels
-        last_x_val = None
-        last_label_y = 1.02  # Initial y position for text labels
-        stack_count = 0  # Track count of stacked labels
-        offset_x = 0  # Horizontal offset for secondary stacks
+    hue_order = [merged_label_map.get(stat_name, stat_name) for stat_name in value_vars]
+    set2_colors = sns.color_palette("Set2", n_colors=len(hue_order))
+    legend_color_map = {label: set2_colors[i] for i, label in enumerate(hue_order)}
 
-        # Iterate over the sorted line positions to add vertical lines and labels
-        for label, x_val in sorted_line_positions:
-            color = line_colors.get(label.lower(), 'black')
-            ax.axvline(x_val, color=color, linestyle='--' if 'Q' in label else '-', label=label)
+    def _sanitize_for_filename(value):
+        safe = ''.join(ch if str(ch).isalnum() else '_' for ch in str(value))
+        safe = safe.strip('_')
+        return safe if safe else 'unknown'
 
-            # Check for potential overlap and adjust y-position if needed
-            if last_x_val is not None and abs(x_val - last_x_val) < 0.1:
-                last_label_y += 0.15
-                stack_count += 1
+    def _plot_single_df(df_subset, output_path_stem, title_suffix=None):
+        if suppress_tissue_classes:
+            suppressed_lower = {str(x).strip().lower() for x in suppress_tissue_classes if str(x).strip()}
+            df_subset = df_subset[
+                ~df_subset["Tissue class"].astype(str).str.lower().isin(suppressed_lower)
+            ].copy()
+            if df_subset.empty:
+                print("Boxplot | all tissue classes suppressed; skipping figure.")
+                return
+
+        # Melt into long format and map source column names to publication labels.
+        df_melted = pd.melt(
+            df_subset,
+            id_vars=["Tissue class"],
+            value_vars=value_vars,
+            var_name="Statistic",
+            value_name="Multinomial Estimator",
+        )
+        df_melted["Statistic Label"] = (
+            df_melted["Statistic"].map(merged_label_map).fillna(df_melted["Statistic"])
+        )
+
+        with sns.axes_style("whitegrid"), sns.plotting_context("paper"):
+            g = sns.catplot(
+                x="Tissue class",
+                y="Multinomial Estimator",
+                hue="Statistic Label",
+                hue_order=hue_order,
+                data=df_melted,
+                kind="box",
+                palette=legend_color_map,
+                legend=False,
+                linewidth=1.0,
+                showfliers=True,
+                flierprops={
+                    "marker": "o",
+                    "markersize": 3,
+                    "markerfacecolor": "white",
+                    "markeredgecolor": "0.35",
+                    "alpha": 0.8,
+                },
+                height=fig_height_in,
+                aspect=plot_aspect,
+            )
+        # Re-assert fixed figure area explicitly for consistent export dimensions.
+        g.fig.set_size_inches(fig_width_in, fig_height_in, forward=True)
+
+        g.set(ylim=(0, 1))
+        g.set_axis_labels("Tissue Class", "Multinomial Estimator")
+
+        for ax in g.axes.flat:
+            ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.6, alpha=0.7)
+            ax.set_axisbelow(True)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            # Keep visible axes lines solid and fully opaque for publication readability.
+            for spine_name in ["left", "bottom"]:
+                ax.spines[spine_name].set_color("black")
+                ax.spines[spine_name].set_linewidth(1.2)
+                ax.spines[spine_name].set_alpha(1.0)
+            ax.set_yticks(np.linspace(0, 1, 6))
+            ax.xaxis.label.set_size(axis_label_fontsize)
+            ax.yaxis.label.set_size(axis_label_fontsize)
+            ax.xaxis.label.set_color("black")
+            ax.yaxis.label.set_color("black")
+            ax.tick_params(axis="x", labelsize=x_tick_label_fontsize, colors="black")
+            ax.tick_params(axis="y", labelsize=y_tick_label_fontsize, colors="black")
+            for tick in ax.get_xticklabels():
+                tick.set_rotation(x_tick_label_rotation)
+                tick.set_ha("right")
+
+        if not remove_title:
+            full_title = plot_title if title_suffix is None else f"{plot_title} ({title_suffix})"
+            g.fig.suptitle(full_title, y=0.99, fontsize=14)
+            g.fig.subplots_adjust(top=0.88, bottom=0.20)
+        else:
+            g.fig.subplots_adjust(top=0.96, bottom=0.20)
+
+        # Draw legend with opaque white frame.
+        if g._legend is not None:
+            g._legend.remove()
+
+        ax0 = g.axes.flat[0]
+        present_labels = set(df_melted["Statistic Label"].dropna().unique().tolist())
+        legend_handles = [
+            Patch(facecolor=legend_color_map[label], edgecolor="0.35", label=label)
+            for label in hue_order
+            if label in present_labels
+        ]
+        if legend_handles:
+            if legend_position == "outside":
+                # Place legend above the figure canvas so figure size controls plot area.
+                legend_anchor_y = 1.02 if remove_title else 1.06
+                legend = g.fig.legend(
+                    handles=legend_handles,
+                    title=None,
+                    loc="lower center",
+                    bbox_to_anchor=(0.5, legend_anchor_y),
+                    frameon=True,
+                    fontsize=legend_fontsize,
+                    ncol=min(2, len(legend_handles)),
+                )
             else:
-                # Reset position and stack count if no overlap
-                last_label_y = 1.02
-                stack_count = 0
-                offset_x = 0
+                legend = ax0.legend(
+                    handles=legend_handles,
+                    title=None,
+                    loc="upper right",
+                    bbox_to_anchor=(0.98, 0.98),
+                    frameon=True,
+                    fontsize=legend_fontsize,
+                )
+            frame = legend.get_frame()
+            frame.set_facecolor("white")
+            frame.set_alpha(1.0)
+            frame.set_edgecolor("black")
+            frame.set_linewidth(0.8)
+            legend.set_zorder(1000)
 
-            # Shift label to the right if stack count exceeds 3
-            if stack_count > 2:
-                offset_x += 0.03  # Increment horizontal offset
-                last_label_y = 1.02  # Reset y-position for the new stack
-                stack_count = 0  # Reset stack count for the new column
+        plt.tight_layout()
+        for fmt in normalized_save_formats:
+            output_path = output_path_stem.with_suffix(f".{fmt}")
+            if legend_position == "outside":
+                # Include off-canvas legend without shrinking axes to make room inside figure.
+                g.savefig(output_path, format=fmt, dpi=save_dpi, bbox_inches="tight", pad_inches=0.03)
+            else:
+                g.savefig(output_path, format=fmt, dpi=save_dpi)
+        plt.close(g.fig)
 
-            # Add text above the plot area with adjusted x and y positions
-            ax.text(x_val + offset_x, last_label_y, f'{x_val:.2f}', color=color, ha='center', va='bottom',
-                    fontsize=14, transform=ax.get_xaxis_transform())
-
-            # Update last_x_val to current x_val
-            last_x_val = x_val
-
-
-        # Set x-axis limits to [0, 1] and enable grid lines
-        ax.set_xlim(0, 1)
-        ax.grid(True)
-        ax.set_xticks(np.arange(0, 1.1, 0.1))  # Sets vertical grid lines every 0.1
-        ax.set_xlabel('')
-        ax.tick_params(axis='x', labelsize=16)  # Adjust the number to your desired font size
-
-
-        # Add title and labels with adjusted title position
-        ax.set_title(f'{tissue_class}', fontsize=16, y=1, x = -0.15, ha='left')
-        ax.set_ylabel('Density', fontsize=16)
-        ax.tick_params(axis='y', labelsize=16)  # Adjust the number to your desired font size
-
-        
-    # X-axis label and figure title
-    fig.text(0.5, 0.04, 'Multinomial Estimator', ha='center', fontsize=16)
-    fig.suptitle('Cohort - Normalized Multinomial Estimator Distribution by Tissue Class For All Biopsy Voxels', fontsize=16)
-
-    # Legend positioned outside the plot area with white background
-    handles, labels = ax.get_legend_handles_labels()
-    legend = fig.legend(handles, labels, loc='center left', bbox_to_anchor=(0.95, 0.5), frameon=True)
-    legend.get_frame().set_facecolor('white')
-    legend.get_frame().set_edgecolor('black')
-
-    # Save the figure
-    output_path = output_dir.joinpath(f"{histogram_plot_name_string}.svg")
-    fig.savefig(output_path, format='svg', dpi=dpi, bbox_inches='tight')
-
-    # Close the figure to free memory
-    plt.close(fig)
-
-
-
-
-
-def cohort_global_scores_boxplot_by_bx_type(cohort_mc_sum_to_one_global_scores_dataframe,
-                                 general_plot_name_string,
-                                 cohort_output_figures_dir):
-
-    df = cohort_mc_sum_to_one_global_scores_dataframe
-
-    # Melt the DataFrame to bring mean, min, and max into a single column for easier plotting
-    df_melted = pd.melt(df, id_vars=['Tissue class', 'Simulated type'], 
-                            value_vars=['Global Min BE', 'Global Mean BE', 'Global Max BE', 'Global STD BE'], 
-                            var_name='Statistic', value_name='Binomial Estimator')
-
-    # Create a grouped boxplot using seaborn with faceting by 'Simulated type'
-    g = sns.catplot(x='Tissue class', y='Binomial Estimator', hue='Statistic', 
-                    col='Simulated type', data=df_melted, kind='box', 
-                    palette="Set2", height=6, aspect=1.5)
-
-    # Set y-axis limits to be between 0 and 1
-    g.set(ylim=(0, 1))
-
-    # Add horizontal grid lines
-    g.set_axis_labels("Tissue Class", "Binomial Estimator")
-    for ax in g.axes.flat:
-        ax.grid(True, which='both', axis='y')  # Add horizontal grid lines to each subplot
-
-    # Customize the plot for better aesthetics
-    g.set_titles("Simulated Type: {col_name}")
-    g.fig.suptitle('Boxplots of Global Mean, Min, and Max (sum-to-one) Values by Tissue Class', y=1.02, fontsize=12)
-    g.set_xticklabels(rotation=45)
-    plt.tight_layout()
-
-    # Save the figure
-    svg_dose_fig_name = general_plot_name_string + '.svg'
-    svg_dose_fig_file_path = cohort_output_figures_dir.joinpath(svg_dose_fig_name)
-    g.savefig(svg_dose_fig_file_path, format='svg')
-
-    # Close the figure to release memory
-    plt.close(g.fig)  # Ensure the figure is closed properly
+    if split_by_simulated_type and "Simulated type" in df.columns:
+        simulated_types = df["Simulated type"].dropna().unique().tolist()
+        for sim_type in simulated_types:
+            df_sim = df[df["Simulated type"] == sim_type].copy()
+            sim_type_suffix = _sanitize_for_filename(sim_type)
+            output_path_stem = cohort_output_figures_dir.joinpath(
+                f"{general_plot_name_string} - simulated_type_{sim_type_suffix}"
+            )
+            _plot_single_df(df_sim, output_path_stem, title_suffix=f"Simulation Type: {sim_type}")
+    else:
+        output_path_stem = cohort_output_figures_dir.joinpath(f"{general_plot_name_string}")
+        _plot_single_df(df, output_path_stem)
 
 
 
@@ -392,6 +633,93 @@ def plot_effect_size_heatmap(results_df, tissue_classes, effect_size_key, output
     plt.savefig(save_path, format='svg')
     plt.close()
     print(f"Heatmap saved to {save_path}")
+
+
+def plot_effect_size_heatmap_stratified_by_simulated_type(
+    df,
+    tissue_classes,
+    output_dir,
+    effect_size_key='mean_diff',
+    patient_id_col='Patient ID',
+    bx_index_col='Bx index',
+    value_col='Global Mean BE',
+    simulated_type_col='Simulated type',
+    filename_prefix=None,
+    title_prefix='Effect size heatmap',
+    vmin=None,
+    vmax=None,
+    axis_label_size=16,
+    tick_fontsize=14,
+    cbar_label_fontsize=16,
+    cbar_tick_fontsize=14,
+):
+    """
+    Compute and plot one effect-size heatmap per simulated type.
+
+    Filenames include simulated type and unique-biopsy count:
+    "<filename_prefix>_<sim_type>_nBiopsies_<N>.svg"
+    """
+    if simulated_type_col not in df.columns:
+        raise KeyError(
+            f"Column '{simulated_type_col}' not found in dataframe; cannot stratify."
+        )
+
+    if filename_prefix is None:
+        filename_prefix = f"{effect_size_key}_heatmap_simulated_type"
+
+    def _sanitize_for_filename(value):
+        safe = ''.join(ch if str(ch).isalnum() else '_' for ch in str(value))
+        safe = safe.strip('_')
+        return safe if safe else 'unknown'
+
+    simulated_types = sorted(
+        df[simulated_type_col].dropna().unique().tolist(),
+        key=lambda x: str(x)
+    )
+
+    for simulated_type in simulated_types:
+        strat_df = df[df[simulated_type_col] == simulated_type]
+        if strat_df.empty:
+            continue
+
+        biopsy_key_cols = [
+            c for c in [patient_id_col, "Bx ID", bx_index_col]
+            if c in strat_df.columns
+        ]
+        if biopsy_key_cols:
+            n_biopsies = strat_df[biopsy_key_cols].drop_duplicates().shape[0]
+        else:
+            n_biopsies = strat_df.shape[0]
+
+        strat_effect_df = statistical_tests_1_quick_and_dirty.paired_effect_size_analysis(
+            strat_df.copy(),
+            tissue_classes,
+            (effect_size_key,),
+            patient_id_col=patient_id_col,
+            bx_index_col=bx_index_col,
+            value_col=value_col,
+        )
+
+        sim_type_suffix = _sanitize_for_filename(simulated_type)
+        fig_name = (
+            f"{filename_prefix}_{sim_type_suffix}_nBiopsies_{n_biopsies}.svg"
+        )
+        title = f"{title_prefix} | Simulated type: {simulated_type}"
+
+        plot_effect_size_heatmap(
+            strat_effect_df,
+            tissue_classes,
+            effect_size_key,
+            output_dir,
+            title=title,
+            fig_name=fig_name,
+            vmin=vmin,
+            vmax=vmax,
+            axis_label_size=axis_label_size,
+            tick_fontsize=tick_fontsize,
+            cbar_label_fontsize=cbar_label_fontsize,
+            cbar_tick_fontsize=cbar_tick_fontsize,
+        )
 
 
 def plot_bx_histograms_by_tissue(df, patient_id, bx_index, output_dir, structs_referenced_dict, default_exterior_tissue, fig_name="histograms.svg", bin_width=0.05, spatial_df=None):
