@@ -812,16 +812,20 @@ def main():
 
 
     ### Find statistics of global tissue scores (START)
-    cohort_global_sum_to_one_tissue_scores_statistics = statistical_tests_1_quick_and_dirty.compute_global_tissue_scores_stats_across_all_biopsies(cohort_global_sum_to_one_tissue_df)
-    # Print the statistics
-    print(cohort_global_sum_to_one_tissue_scores_statistics)
-    # Save the statistics to a CSV file
-    output_filename = 'global_tissue_scores_statistics_all_patients.csv'
     # use statistical_tests_1_dir
     statistical_tests_1_dir = output_dir.joinpath("statistical_tests_0")
     os.makedirs(statistical_tests_1_dir, exist_ok=True)
-    # Save the statistics to a CSV file
-    cohort_global_sum_to_one_tissue_scores_statistics.to_csv(statistical_tests_1_dir.joinpath(output_filename), index=True)
+    cohort_global_sum_to_one_tissue_scores_statistics = (
+        statistical_tests_1_quick_and_dirty.compute_global_tissue_scores_stats_across_all_biopsies(
+            cohort_global_sum_to_one_tissue_df,
+            save_csv=True,
+            output_dir=statistical_tests_1_dir,
+            all_output_filename='global_tissue_scores_statistics_all_patients.csv',
+            stratify_by_simulated_type=True,
+        )
+    )
+    # Print the statistics
+    print(cohort_global_sum_to_one_tissue_scores_statistics)
     ### Find statistics of global tissue scores (END)
 
 
