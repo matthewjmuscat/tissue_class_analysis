@@ -867,7 +867,8 @@ def main():
                                                                                     cohort_output_figures_dir,
                                                                                     bx_sample_pts_vol_element,
                                                                                     bin_width=0.05,
-                                                                                    bandwidth=0.1)
+                                                                                    bandwidth=0.1,
+                                                                                    split_by_simulated_type=True)
 
 
 
