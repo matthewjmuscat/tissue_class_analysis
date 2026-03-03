@@ -879,10 +879,10 @@ def main():
     # 2. cohort sum to one boxplot global scores
     general_plot_name_string = 'cohort - sum-to-one_boxplot_global_scores'
     core_level_statistic_label_map = {
-        "Global Min BE": r"Core-level Min   $\min(\mathcal{P}_i)$",
-        "Global Mean BE": r"Core-level Mean   $\langle \mathcal{P}_i \rangle$",
-        "Global Max BE": r"Core-level Max   $\max(\mathcal{P}_i)$",
-        "Global STD BE": r"Core-level SD   $\sigma(\mathcal{P}_i)$",
+        "Global Min BE": r"Core-level Min, $\min(\mathcal{P}_i)$",
+        "Global Mean BE": r"Core-level Mean, $\langle \mathcal{P}_i \rangle$",
+        "Global Max BE": r"Core-level Max, $\max(\mathcal{P}_i)$",
+        "Global STD BE": r"Core-level SD, $\sigma(\mathcal{P}_i)$",
     }
     production_plots.cohort_global_scores_boxplot_by_bx_type(cohort_global_sum_to_one_tissue_df,
                                  general_plot_name_string,
@@ -890,13 +890,15 @@ def main():
                                  statistic_label_map=core_level_statistic_label_map,
                                  plot_title='Core-level Mean, Min, Max, and SD (sum-to-one) by Tissue Class',
                                  split_by_simulated_type=True,
+                                 suppress_tissue_classes=["rectal", "urethral"],
                                  remove_title=True,
+                                 legend_position="outside",
                                 axis_label_fontsize=16,
                                 x_tick_label_fontsize=14,
                                 y_tick_label_fontsize=14,
                                 x_tick_label_rotation=30,
                                 legend_fontsize=16,
-                                fig_width_in=10.0,
+                                fig_width_in=11.0,
                                 fig_height_in=6.0,
                                 save_dpi=300,
                                 save_formats=["svg", "png", "pdf"])

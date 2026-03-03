@@ -225,7 +225,9 @@ def cohort_global_scores_boxplot_by_bx_type(
     statistic_label_map=None,
     plot_title="Core-level Tissue Score Distributions by Tissue Class",
     split_by_simulated_type=True,
+    suppress_tissue_classes=None,
     remove_title=False,
+    legend_position="inside",
     axis_label_fontsize=16,
     x_tick_label_fontsize=14,
     y_tick_label_fontsize=14,
@@ -253,8 +255,12 @@ def cohort_global_scores_boxplot_by_bx_type(
         Figure-level title.
     split_by_simulated_type : bool
         If True, save one figure per simulated type. If False, save one pooled figure.
+    suppress_tissue_classes : list[str] | None
+        Tissue classes to hide from plotting (case-insensitive), e.g. ["rectal", "urethral"].
     remove_title : bool
         If True, do not draw the figure title.
+    legend_position : str
+        Legend placement: "inside" (top-right in axes) or "outside" (to the right of axes).
     axis_label_fontsize : int
         Font size for x/y axis labels.
     x_tick_label_fontsize : int
@@ -280,6 +286,9 @@ def cohort_global_scores_boxplot_by_bx_type(
     cohort_output_figures_dir.mkdir(parents=True, exist_ok=True)
     if fig_width_in <= 0 or fig_height_in <= 0 or save_dpi <= 0:
         raise ValueError("fig_width_in, fig_height_in, and save_dpi must be positive.")
+    legend_position = str(legend_position).strip().lower()
+    if legend_position not in {"inside", "outside"}:
+        raise ValueError("legend_position must be either 'inside' or 'outside'.")
     if save_formats is None:
         normalized_save_formats = ["svg"]
     elif isinstance(save_formats, str):
@@ -300,10 +309,10 @@ def cohort_global_scores_boxplot_by_bx_type(
 
     value_vars = ["Global Min BE", "Global Mean BE", "Global Max BE", "Global STD BE"]
     default_statistic_label_map = {
-        "Global Min BE": r"Core-level Min   $\min(\mathcal{P}_i)$",
-        "Global Mean BE": r"Core-level Mean   $\langle \mathcal{P}_i \rangle$",
-        "Global Max BE": r"Core-level Max   $\max(\mathcal{P}_i)$",
-        "Global STD BE": r"Core-level SD   $\sigma(\mathcal{P}_i)$",
+        "Global Min BE": r"Core-level Min, $\min(\mathcal{P}_i)$",
+        "Global Mean BE": r"Core-level Mean, $\langle \mathcal{P}_i \rangle$",
+        "Global Max BE": r"Core-level Max, $\max(\mathcal{P}_i)$",
+        "Global STD BE": r"Core-level SD, $\sigma(\mathcal{P}_i)$",
     }
 
     merged_label_map = default_statistic_label_map.copy()
@@ -320,6 +329,15 @@ def cohort_global_scores_boxplot_by_bx_type(
         return safe if safe else 'unknown'
 
     def _plot_single_df(df_subset, output_path_stem, title_suffix=None):
+        if suppress_tissue_classes:
+            suppressed_lower = {str(x).strip().lower() for x in suppress_tissue_classes if str(x).strip()}
+            df_subset = df_subset[
+                ~df_subset["Tissue class"].astype(str).str.lower().isin(suppressed_lower)
+            ].copy()
+            if df_subset.empty:
+                print("Boxplot | all tissue classes suppressed; skipping figure.")
+                return
+
         # Melt into long format and map source column names to publication labels.
         df_melted = pd.melt(
             df_subset,
@@ -365,11 +383,18 @@ def cohort_global_scores_boxplot_by_bx_type(
             ax.set_axisbelow(True)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
+            # Keep visible axes lines solid and fully opaque for publication readability.
+            for spine_name in ["left", "bottom"]:
+                ax.spines[spine_name].set_color("black")
+                ax.spines[spine_name].set_linewidth(1.2)
+                ax.spines[spine_name].set_alpha(1.0)
             ax.set_yticks(np.linspace(0, 1, 6))
             ax.xaxis.label.set_size(axis_label_fontsize)
             ax.yaxis.label.set_size(axis_label_fontsize)
-            ax.tick_params(axis="x", labelsize=x_tick_label_fontsize)
-            ax.tick_params(axis="y", labelsize=y_tick_label_fontsize)
+            ax.xaxis.label.set_color("black")
+            ax.yaxis.label.set_color("black")
+            ax.tick_params(axis="x", labelsize=x_tick_label_fontsize, colors="black")
+            ax.tick_params(axis="y", labelsize=y_tick_label_fontsize, colors="black")
             for tick in ax.get_xticklabels():
                 tick.set_rotation(x_tick_label_rotation)
                 tick.set_ha("right")
@@ -381,7 +406,7 @@ def cohort_global_scores_boxplot_by_bx_type(
         else:
             g.fig.subplots_adjust(top=0.96, bottom=0.20)
 
-        # Force legend inside the plot area (top-right) with opaque white frame.
+        # Draw legend with opaque white frame.
         if g._legend is not None:
             g._legend.remove()
 
@@ -393,14 +418,27 @@ def cohort_global_scores_boxplot_by_bx_type(
             if label in present_labels
         ]
         if legend_handles:
-            legend = ax0.legend(
-                handles=legend_handles,
-                title=None,
-                loc="upper right",
-                bbox_to_anchor=(0.98, 0.98),
-                frameon=True,
-                fontsize=legend_fontsize,
-            )
+            if legend_position == "outside":
+                # Place legend above the figure canvas so figure size controls plot area.
+                legend_anchor_y = 1.02 if remove_title else 1.06
+                legend = g.fig.legend(
+                    handles=legend_handles,
+                    title=None,
+                    loc="lower center",
+                    bbox_to_anchor=(0.5, legend_anchor_y),
+                    frameon=True,
+                    fontsize=legend_fontsize,
+                    ncol=min(2, len(legend_handles)),
+                )
+            else:
+                legend = ax0.legend(
+                    handles=legend_handles,
+                    title=None,
+                    loc="upper right",
+                    bbox_to_anchor=(0.98, 0.98),
+                    frameon=True,
+                    fontsize=legend_fontsize,
+                )
             frame = legend.get_frame()
             frame.set_facecolor("white")
             frame.set_alpha(1.0)
@@ -411,7 +449,11 @@ def cohort_global_scores_boxplot_by_bx_type(
         plt.tight_layout()
         for fmt in normalized_save_formats:
             output_path = output_path_stem.with_suffix(f".{fmt}")
-            g.savefig(output_path, format=fmt, dpi=save_dpi)
+            if legend_position == "outside":
+                # Include off-canvas legend without shrinking axes to make room inside figure.
+                g.savefig(output_path, format=fmt, dpi=save_dpi, bbox_inches="tight", pad_inches=0.03)
+            else:
+                g.savefig(output_path, format=fmt, dpi=save_dpi)
         plt.close(g.fig)
 
     if split_by_simulated_type and "Simulated type" in df.columns:
