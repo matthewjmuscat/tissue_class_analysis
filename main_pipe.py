@@ -889,10 +889,38 @@ def main():
                                  cohort_output_figures_dir,
                                  statistic_label_map=core_level_statistic_label_map,
                                  plot_title='Core-level Mean, Min, Max, and SD (sum-to-one) by Tissue Class',
-                                 publication_style=True)
+                                 split_by_simulated_type=True,
+                                 remove_title=True,
+                                axis_label_fontsize=16,
+                                x_tick_label_fontsize=14,
+                                y_tick_label_fontsize=14,
+                                x_tick_label_rotation=30,
+                                legend_fontsize=16,
+                                fig_width_in=10.0,
+                                fig_height_in=6.0,
+                                save_dpi=300,
+                                save_formats=["svg", "png", "pdf"])
 
-
-
+    tissue_types = ["DIL", 'Prostatic', 'Periprostatic', 'Urethral', 'Rectal']
+    # stratified mean-difference heatmaps by simulated type
+    production_plots.plot_effect_size_heatmap_stratified_by_simulated_type(
+        cohort_global_sum_to_one_tissue_df,
+        tissue_types,
+        cohort_output_figures_dir,
+        effect_size_key='mean_diff',
+        patient_id_col='Patient ID',
+        bx_index_col='Bx index',
+        value_col='Global Mean BE',
+        simulated_type_col='Simulated type',
+        filename_prefix='mean_diff_heatmap_simulated_type',
+        title_prefix='Effect size heatmap',
+        vmin=-1,
+        vmax=1,
+        axis_label_size=16,
+        tick_fontsize=14,
+        cbar_label_fontsize=16,
+        cbar_tick_fontsize=14,
+    )
 
 
     # 3. individual patient histograms of tissue scores by tissue type:
@@ -1103,6 +1131,7 @@ def main():
                                                   cbar_label_fontsize=16, 
                                                   cbar_tick_fontsize=14)
 
+    
 
 
 

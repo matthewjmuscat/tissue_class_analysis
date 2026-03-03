@@ -14,7 +14,9 @@ from matplotlib.lines import Line2D
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
+from matplotlib.patches import Patch
 import os
+import statistical_tests_1_quick_and_dirty
 
 
 def production_plot_cohort_sum_to_one_all_biopsy_voxels_binom_est_histogram_by_tissue_class(dataframe,
@@ -222,7 +224,17 @@ def cohort_global_scores_boxplot_by_bx_type(
     cohort_output_figures_dir,
     statistic_label_map=None,
     plot_title="Core-level Tissue Score Distributions by Tissue Class",
-    publication_style=True,
+    split_by_simulated_type=True,
+    remove_title=False,
+    axis_label_fontsize=16,
+    x_tick_label_fontsize=14,
+    y_tick_label_fontsize=14,
+    x_tick_label_rotation=45,
+    legend_fontsize=12,
+    fig_width_in=10.0,
+    fig_height_in=8.0,
+    save_dpi=300,
+    save_formats=None,
 ):
     """
     Plot cohort-level boxplots for core-level summary scores by tissue class.
@@ -239,14 +251,52 @@ def cohort_global_scores_boxplot_by_bx_type(
         Optional mapping from source score columns to legend labels.
     plot_title : str
         Figure-level title.
-    publication_style : bool
-        If True, apply cleaner paper-oriented styling defaults.
+    split_by_simulated_type : bool
+        If True, save one figure per simulated type. If False, save one pooled figure.
+    remove_title : bool
+        If True, do not draw the figure title.
+    axis_label_fontsize : int
+        Font size for x/y axis labels.
+    x_tick_label_fontsize : int
+        Font size for x-axis tick labels.
+    y_tick_label_fontsize : int
+        Font size for y-axis tick labels.
+    x_tick_label_rotation : float
+        Rotation angle for x-axis tick labels in degrees.
+    legend_fontsize : int
+        Font size for legend text.
+    fig_width_in : float
+        Fixed output figure width in inches.
+    fig_height_in : float
+        Fixed output figure height in inches.
+    save_dpi : int
+        DPI used for raster exports (e.g., PNG). Ignored by vector quality itself.
+    save_formats : list[str] | str | None
+        Output file formats to save (e.g., ["svg", "png", "pdf"]).
+        If None, defaults to ["svg"].
     """
     if not isinstance(cohort_output_figures_dir, Path):
         cohort_output_figures_dir = Path(cohort_output_figures_dir)
     cohort_output_figures_dir.mkdir(parents=True, exist_ok=True)
+    if fig_width_in <= 0 or fig_height_in <= 0 or save_dpi <= 0:
+        raise ValueError("fig_width_in, fig_height_in, and save_dpi must be positive.")
+    if save_formats is None:
+        normalized_save_formats = ["svg"]
+    elif isinstance(save_formats, str):
+        normalized_save_formats = [save_formats]
+    else:
+        normalized_save_formats = list(save_formats)
+
+    normalized_save_formats = [
+        str(fmt).lower().lstrip(".")
+        for fmt in normalized_save_formats
+        if str(fmt).strip()
+    ]
+    if not normalized_save_formats:
+        raise ValueError("save_formats must contain at least one format.")
 
     df = cohort_mc_sum_to_one_global_scores_dataframe.copy()
+    plot_aspect = fig_width_in / fig_height_in
 
     value_vars = ["Global Min BE", "Global Mean BE", "Global Max BE", "Global STD BE"]
     default_statistic_label_map = {
@@ -260,37 +310,38 @@ def cohort_global_scores_boxplot_by_bx_type(
     if statistic_label_map is not None:
         merged_label_map.update(statistic_label_map)
 
-    # Melt into long format and map source column names to publication labels.
-    df_melted = pd.melt(
-        df,
-        id_vars=["Tissue class", "Simulated type"],
-        value_vars=value_vars,
-        var_name="Statistic",
-        value_name="Multinomial Estimator",
-    )
-    df_melted["Statistic Label"] = (
-        df_melted["Statistic"].map(merged_label_map).fillna(df_melted["Statistic"])
-    )
-
     hue_order = [merged_label_map.get(stat_name, stat_name) for stat_name in value_vars]
-    palette = {
-        hue_order[0]: "#009E73",  # green
-        hue_order[1]: "#E69F00",  # orange
-        hue_order[2]: "#0072B2",  # blue
-        hue_order[3]: "#CC79A7",  # magenta
-    }
+    set2_colors = sns.color_palette("Set2", n_colors=len(hue_order))
+    legend_color_map = {label: set2_colors[i] for i, label in enumerate(hue_order)}
 
-    if publication_style:
+    def _sanitize_for_filename(value):
+        safe = ''.join(ch if str(ch).isalnum() else '_' for ch in str(value))
+        safe = safe.strip('_')
+        return safe if safe else 'unknown'
+
+    def _plot_single_df(df_subset, output_path_stem, title_suffix=None):
+        # Melt into long format and map source column names to publication labels.
+        df_melted = pd.melt(
+            df_subset,
+            id_vars=["Tissue class"],
+            value_vars=value_vars,
+            var_name="Statistic",
+            value_name="Multinomial Estimator",
+        )
+        df_melted["Statistic Label"] = (
+            df_melted["Statistic"].map(merged_label_map).fillna(df_melted["Statistic"])
+        )
+
         with sns.axes_style("whitegrid"), sns.plotting_context("paper"):
             g = sns.catplot(
                 x="Tissue class",
                 y="Multinomial Estimator",
                 hue="Statistic Label",
                 hue_order=hue_order,
-                col="Simulated type",
                 data=df_melted,
                 kind="box",
-                palette=palette,
+                palette=legend_color_map,
+                legend=False,
                 linewidth=1.0,
                 showfliers=True,
                 flierprops={
@@ -300,65 +351,81 @@ def cohort_global_scores_boxplot_by_bx_type(
                     "markeredgecolor": "0.35",
                     "alpha": 0.8,
                 },
-                height=5.0,
-                aspect=1.25,
+                height=fig_height_in,
+                aspect=plot_aspect,
             )
+        # Re-assert fixed figure area explicitly for consistent export dimensions.
+        g.fig.set_size_inches(fig_width_in, fig_height_in, forward=True)
+
+        g.set(ylim=(0, 1))
+        g.set_axis_labels("Tissue Class", "Multinomial Estimator")
+
+        for ax in g.axes.flat:
+            ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.6, alpha=0.7)
+            ax.set_axisbelow(True)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.set_yticks(np.linspace(0, 1, 6))
+            ax.xaxis.label.set_size(axis_label_fontsize)
+            ax.yaxis.label.set_size(axis_label_fontsize)
+            ax.tick_params(axis="x", labelsize=x_tick_label_fontsize)
+            ax.tick_params(axis="y", labelsize=y_tick_label_fontsize)
+            for tick in ax.get_xticklabels():
+                tick.set_rotation(x_tick_label_rotation)
+                tick.set_ha("right")
+
+        if not remove_title:
+            full_title = plot_title if title_suffix is None else f"{plot_title} ({title_suffix})"
+            g.fig.suptitle(full_title, y=0.99, fontsize=14)
+            g.fig.subplots_adjust(top=0.88, bottom=0.20)
+        else:
+            g.fig.subplots_adjust(top=0.96, bottom=0.20)
+
+        # Force legend inside the plot area (top-right) with opaque white frame.
+        if g._legend is not None:
+            g._legend.remove()
+
+        ax0 = g.axes.flat[0]
+        present_labels = set(df_melted["Statistic Label"].dropna().unique().tolist())
+        legend_handles = [
+            Patch(facecolor=legend_color_map[label], edgecolor="0.35", label=label)
+            for label in hue_order
+            if label in present_labels
+        ]
+        if legend_handles:
+            legend = ax0.legend(
+                handles=legend_handles,
+                title=None,
+                loc="upper right",
+                bbox_to_anchor=(0.98, 0.98),
+                frameon=True,
+                fontsize=legend_fontsize,
+            )
+            frame = legend.get_frame()
+            frame.set_facecolor("white")
+            frame.set_alpha(1.0)
+            frame.set_edgecolor("black")
+            frame.set_linewidth(0.8)
+            legend.set_zorder(1000)
+
+        plt.tight_layout()
+        for fmt in normalized_save_formats:
+            output_path = output_path_stem.with_suffix(f".{fmt}")
+            g.savefig(output_path, format=fmt, dpi=save_dpi)
+        plt.close(g.fig)
+
+    if split_by_simulated_type and "Simulated type" in df.columns:
+        simulated_types = df["Simulated type"].dropna().unique().tolist()
+        for sim_type in simulated_types:
+            df_sim = df[df["Simulated type"] == sim_type].copy()
+            sim_type_suffix = _sanitize_for_filename(sim_type)
+            output_path_stem = cohort_output_figures_dir.joinpath(
+                f"{general_plot_name_string} - simulated_type_{sim_type_suffix}"
+            )
+            _plot_single_df(df_sim, output_path_stem, title_suffix=f"Simulation Type: {sim_type}")
     else:
-        g = sns.catplot(
-            x="Tissue class",
-            y="Multinomial Estimator",
-            hue="Statistic Label",
-            hue_order=hue_order,
-            col="Simulated type",
-            data=df_melted,
-            kind="box",
-            palette=palette,
-            linewidth=1.0,
-            showfliers=True,
-            flierprops={
-                "marker": "o",
-                "markersize": 3,
-                "markerfacecolor": "white",
-                "markeredgecolor": "0.35",
-                "alpha": 0.8,
-            },
-            height=6.0,
-            aspect=1.5,
-        )
-
-    g.set(ylim=(0, 1))
-    g.set_axis_labels("Tissue Class", "Multinomial Estimator")
-    g.set_titles("Simulation Type: {col_name}")
-
-    for ax in g.axes.flat:
-        ax.grid(True, which="major", axis="y", linestyle="--", linewidth=0.6, alpha=0.7)
-        ax.set_axisbelow(True)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.set_yticks(np.linspace(0, 1, 6))
-        for tick in ax.get_xticklabels():
-            tick.set_rotation(45)
-            tick.set_ha("right")
-
-    g.fig.suptitle(plot_title, y=0.99, fontsize=14 if publication_style else 12)
-    g.fig.subplots_adjust(top=0.86 if publication_style else 0.9, bottom=0.20)
-
-    if g._legend is not None:
-        g._legend.set_title("Statistic")
-        if publication_style:
-            g._legend.set_bbox_to_anchor((1.02, 0.98))
-            if hasattr(g._legend, "set_loc"):
-                g._legend.set_loc("upper left")
-            g._legend.get_frame().set_alpha(1.0)
-            g._legend.get_frame().set_edgecolor("0.2")
-
-    plt.tight_layout()
-
-    svg_dose_fig_name = general_plot_name_string + ".svg"
-    svg_dose_fig_file_path = cohort_output_figures_dir.joinpath(svg_dose_fig_name)
-    g.savefig(svg_dose_fig_file_path, format="svg", bbox_inches="tight")
-
-    plt.close(g.fig)
+        output_path_stem = cohort_output_figures_dir.joinpath(f"{general_plot_name_string}")
+        _plot_single_df(df, output_path_stem)
 
 
 
@@ -524,6 +591,93 @@ def plot_effect_size_heatmap(results_df, tissue_classes, effect_size_key, output
     plt.savefig(save_path, format='svg')
     plt.close()
     print(f"Heatmap saved to {save_path}")
+
+
+def plot_effect_size_heatmap_stratified_by_simulated_type(
+    df,
+    tissue_classes,
+    output_dir,
+    effect_size_key='mean_diff',
+    patient_id_col='Patient ID',
+    bx_index_col='Bx index',
+    value_col='Global Mean BE',
+    simulated_type_col='Simulated type',
+    filename_prefix=None,
+    title_prefix='Effect size heatmap',
+    vmin=None,
+    vmax=None,
+    axis_label_size=16,
+    tick_fontsize=14,
+    cbar_label_fontsize=16,
+    cbar_tick_fontsize=14,
+):
+    """
+    Compute and plot one effect-size heatmap per simulated type.
+
+    Filenames include simulated type and unique-biopsy count:
+    "<filename_prefix>_<sim_type>_nBiopsies_<N>.svg"
+    """
+    if simulated_type_col not in df.columns:
+        raise KeyError(
+            f"Column '{simulated_type_col}' not found in dataframe; cannot stratify."
+        )
+
+    if filename_prefix is None:
+        filename_prefix = f"{effect_size_key}_heatmap_simulated_type"
+
+    def _sanitize_for_filename(value):
+        safe = ''.join(ch if str(ch).isalnum() else '_' for ch in str(value))
+        safe = safe.strip('_')
+        return safe if safe else 'unknown'
+
+    simulated_types = sorted(
+        df[simulated_type_col].dropna().unique().tolist(),
+        key=lambda x: str(x)
+    )
+
+    for simulated_type in simulated_types:
+        strat_df = df[df[simulated_type_col] == simulated_type]
+        if strat_df.empty:
+            continue
+
+        biopsy_key_cols = [
+            c for c in [patient_id_col, "Bx ID", bx_index_col]
+            if c in strat_df.columns
+        ]
+        if biopsy_key_cols:
+            n_biopsies = strat_df[biopsy_key_cols].drop_duplicates().shape[0]
+        else:
+            n_biopsies = strat_df.shape[0]
+
+        strat_effect_df = statistical_tests_1_quick_and_dirty.paired_effect_size_analysis(
+            strat_df.copy(),
+            tissue_classes,
+            (effect_size_key,),
+            patient_id_col=patient_id_col,
+            bx_index_col=bx_index_col,
+            value_col=value_col,
+        )
+
+        sim_type_suffix = _sanitize_for_filename(simulated_type)
+        fig_name = (
+            f"{filename_prefix}_{sim_type_suffix}_nBiopsies_{n_biopsies}.svg"
+        )
+        title = f"{title_prefix} | Simulated type: {simulated_type}"
+
+        plot_effect_size_heatmap(
+            strat_effect_df,
+            tissue_classes,
+            effect_size_key,
+            output_dir,
+            title=title,
+            fig_name=fig_name,
+            vmin=vmin,
+            vmax=vmax,
+            axis_label_size=axis_label_size,
+            tick_fontsize=tick_fontsize,
+            cbar_label_fontsize=cbar_label_fontsize,
+            cbar_tick_fontsize=cbar_tick_fontsize,
+        )
 
 
 def plot_bx_histograms_by_tissue(df, patient_id, bx_index, output_dir, structs_referenced_dict, default_exterior_tissue, fig_name="histograms.svg", bin_width=0.05, spatial_df=None):
