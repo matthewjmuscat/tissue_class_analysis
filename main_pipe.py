@@ -27,8 +27,12 @@ def main():
 
     # This one is 10k containment and 10 (very low) dosim for speed, all vitesse patients, also 2.5^3 for dil, 2.5 only for OARs
     # also includes simulated cores of centroid and optimal types and repaired sampling of biopsies bug also now includes voxelwise classification of biopsy voxels into prostate double sextants
-    main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Jan-03-2026 Time-05,38,44")
-
+    #main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Jan-03-2026 Time-05,38,44")
+    
+    # This one is 10k containment and 10 (very low) dosim for speed, all vitesse patients, also 2.5^3 for dil, 2.5 only for OARs
+    # also includes simulated cores of centroid and optimal types
+    # should also include simulated type column now for distance dataframes
+    main_output_path = Path("/home/matthew-muscat/Documents/UBC/Research/Data/Output data/MC_sim_out- Date-Mar-03-2026 Time-15,34,07 -- full 51 biopsy cohort with simulated centroid and optimal bxs - good for QA or tissue class analysis")
     
 
 
