@@ -38,6 +38,10 @@ MPL_FONT_RC = {
     "mathtext.fontset": "stix",
     "font.family": "STIXGeneral",
     "axes.unicode_minus": True,
+    "lines.solid_capstyle": "round",
+    "lines.dash_capstyle": "round",
+    "lines.solid_joinstyle": "round",
+    "lines.dash_joinstyle": "round",
 }
 
 MPL_FACE_RC = {
@@ -58,13 +62,13 @@ GROUP_COLOR_MAP = {
 CONTRAST_COLOR_MAP = {
     "centroid_minus_real": "#c75000",
     "optimal_minus_real": "#2a9d8f",
-    "optimal_minus_centroid": "#4a4a4a",
+    "optimal_minus_centroid": "#7a5195",
 }
 
 PAIR_LINE_COLOR = "#c7c7c7"
 GRID_COLOR = "#b8b8b8"
 REFERENCE_LINE_COLOR = "#6f6f6f"
-HIGHLIGHT_COLOR = "#c33d3d"
+HIGHLIGHT_COLOR = "#8C2F39"
 FAMILY_FILL_ALPHA = 0.14
 PROFILE_FILL_ALPHA = 0.24
 DANGER_ZONE_COLOR = "#e5989b"
@@ -960,6 +964,83 @@ def plot_safety_distance_family_comparison(
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
 
 
+def _profile_step_edges_and_values(
+    fam_df: pd.DataFrame,
+    value_col: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    ordered = fam_df.sort_values("Voxel index")
+    edges = np.concatenate(
+        [
+            ordered["Voxel begin (Z)"].to_numpy(dtype=float),
+            np.array([float(ordered["Voxel end (Z)"].iloc[-1])], dtype=float),
+        ]
+    )
+    values = ordered[value_col].to_numpy(dtype=float)
+    return edges, values
+
+
+def _draw_profile_family_curve(
+    ax,
+    fam_df: pd.DataFrame,
+    family_name: str,
+    style: dict[str, object],
+    *,
+    step_mode: bool,
+) -> None:
+    fam_df = fam_df.sort_values("Voxel index")
+    if fam_df.empty:
+        return
+
+    if step_mode:
+        edges, y = _profile_step_edges_and_values(fam_df, "Binomial estimator")
+        _, y_low = _profile_step_edges_and_values(fam_df, "CI lower vals")
+        _, y_high = _profile_step_edges_and_values(fam_df, "CI upper vals")
+        x_repeat = np.repeat(edges, 2)[1:-1]
+        y_repeat = np.repeat(y, 2)
+        y_low_repeat = np.repeat(y_low, 2)
+        y_high_repeat = np.repeat(y_high, 2)
+        ax.fill_between(
+            x_repeat,
+            y_low_repeat,
+            y_high_repeat,
+            color=style["color"],
+            alpha=PROFILE_FILL_ALPHA,
+            linewidth=0,
+            zorder=1,
+        )
+        ax.plot(
+            x_repeat,
+            y_repeat,
+            color=style["color"],
+            linewidth=style["linewidth"],
+            linestyle=style["linestyle"],
+            zorder=3,
+        )
+        return
+
+    x = fam_df["Voxel mid Z"].to_numpy(dtype=float)
+    y = fam_df["Binomial estimator"].to_numpy(dtype=float)
+    y_low = fam_df["CI lower vals"].to_numpy(dtype=float)
+    y_high = fam_df["CI upper vals"].to_numpy(dtype=float)
+    ax.fill_between(
+        x,
+        y_low,
+        y_high,
+        color=style["color"],
+        alpha=PROFILE_FILL_ALPHA,
+        linewidth=0,
+        zorder=1,
+    )
+    ax.plot(
+        x,
+        y,
+        color=style["color"],
+        linewidth=style["linewidth"],
+        linestyle=style["linestyle"],
+        zorder=3,
+    )
+
+
 def _profile_box_text(case_df: pd.DataFrame) -> str:
     case_row = case_df.iloc[0]
     return "\n".join(
@@ -974,13 +1055,14 @@ def _profile_box_text(case_df: pd.DataFrame) -> str:
     )
 
 
-def plot_selected_dil_profiles(
+def _plot_selected_dil_profiles_impl(
     selected_profile_long_df: pd.DataFrame,
     selected_profile_cases_df: pd.DataFrame,
     save_dir: str | Path,
     *,
     export_config: QAFigureExportConfig = QAFigureExportConfig(),
-    file_stem: str = "Fig_QA_05_selected_dil_profiles",
+    file_stem: str,
+    step_mode: bool,
 ) -> list[Path]:
     if selected_profile_long_df.empty or selected_profile_cases_df.empty:
         return []
@@ -1030,28 +1112,8 @@ def plot_selected_dil_profiles(
                 fam_df = case_df[case_df["Family group"] == family_name].sort_values("Voxel index")
                 if fam_df.empty:
                     continue
-                x = fam_df["Voxel mid Z"].to_numpy(dtype=float)
-                y = fam_df["Binomial estimator"].to_numpy(dtype=float)
-                y_low = fam_df["CI lower vals"].to_numpy(dtype=float)
-                y_high = fam_df["CI upper vals"].to_numpy(dtype=float)
                 style = family_line_specs[family_name]
-                ax.fill_between(
-                    x,
-                    y_low,
-                    y_high,
-                    color=style["color"],
-                    alpha=PROFILE_FILL_ALPHA,
-                    linewidth=0,
-                    zorder=1,
-                )
-                ax.plot(
-                    x,
-                    y,
-                    color=style["color"],
-                    linewidth=style["linewidth"],
-                    linestyle=style["linestyle"],
-                    zorder=3,
-                )
+                _draw_profile_family_curve(ax, fam_df, family_name, style, step_mode=step_mode)
 
             ax.set_xlim(x_min - 0.4, x_max + 0.4)
             ax.set_ylim(-0.02, 1.02)
@@ -1083,4 +1145,182 @@ def plot_selected_dil_profiles(
         fig.subplots_adjust(top=0.84, bottom=0.12, hspace=0.52, wspace=0.18)
         for ax, text in outside_box_specs:
             _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.010)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+
+
+def plot_selected_dil_profiles(
+    selected_profile_long_df: pd.DataFrame,
+    selected_profile_cases_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_05_selected_dil_profiles",
+) -> list[Path]:
+    return _plot_selected_dil_profiles_impl(
+        selected_profile_long_df,
+        selected_profile_cases_df,
+        save_dir,
+        export_config=export_config,
+        file_stem=file_stem,
+        step_mode=False,
+    )
+
+
+def plot_selected_dil_profiles_step(
+    selected_profile_long_df: pd.DataFrame,
+    selected_profile_cases_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_06_selected_dil_profiles_step",
+) -> list[Path]:
+    return _plot_selected_dil_profiles_impl(
+        selected_profile_long_df,
+        selected_profile_cases_df,
+        save_dir,
+        export_config=export_config,
+        file_stem=file_stem,
+        step_mode=True,
+    )
+
+
+def _category_tick_labels(sub: pd.DataFrame, category_col: str, category_order: Sequence[str]) -> list[str]:
+    counts = sub[category_col].value_counts()
+    labels: list[str] = []
+    for category in category_order:
+        n = int(counts.get(category, 0))
+        if category in {"Posterior", "Anterior"}:
+            display = category
+        elif category in {"Apex", "Mid", "Base"}:
+            display = category
+        else:
+            display = category
+        labels.append(f"{display}\n(n={n})")
+    return labels
+
+
+def plot_optimizer_difficulty_summary(
+    optimizer_difficulty_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_07_optimizer_difficulty_summary",
+) -> list[Path]:
+    if optimizer_difficulty_df.empty:
+        return []
+
+    df = optimizer_difficulty_df.copy()
+    y_col = "optimizer_gain_mean__DIL Global Mean BE"
+    optimizer_color = CONTRAST_COLOR_MAP["optimal_minus_centroid"]
+    double_sextant_order = ["LP", "LA", "RP", "RA"]
+    ap_order = ["Posterior", "Anterior"]
+    si_order = ["Apex", "Mid", "Base"]
+
+    with _font_rc(export_config):
+        fig, axes = plt.subplots(2, 2, figsize=(13.8, 9.0), dpi=export_config.dpi, sharey=True)
+        axes_flat = list(np.ravel(axes))
+        y_vals = df[y_col].to_numpy(dtype=float)
+        y_min = float(np.nanmin(y_vals))
+        y_max = float(np.nanmax(y_vals))
+        y_span = max(y_max - y_min, 0.08)
+        y_lim = (
+            min(-0.14, y_min - 0.10 * y_span),
+            max(0.10, y_max + 0.12 * y_span),
+        )
+
+        ax = axes_flat[0]
+        scatter_df = df.dropna(subset=["DIL Maximum 3D diameter", y_col]).copy()
+        x = scatter_df["DIL Maximum 3D diameter"].to_numpy(dtype=float)
+        y = scatter_df[y_col].to_numpy(dtype=float)
+        ax.scatter(
+            x,
+            y,
+            s=62,
+            color=optimizer_color,
+            edgecolor="white",
+            linewidth=0.8,
+            alpha=0.95,
+            zorder=3,
+        )
+        if len(x) >= 2:
+            x_grid = np.linspace(np.nanmin(x), np.nanmax(x), 200)
+            slope, intercept = np.polyfit(x, y, deg=1)
+            ax.plot(
+                x_grid,
+                intercept + slope * x_grid,
+                color=optimizer_color,
+                linewidth=1.8,
+                linestyle=(0, (5, 3)),
+                zorder=2,
+            )
+            rho_s = pd.Series(x).corr(pd.Series(y), method="spearman")
+            ax.text(
+                0.03,
+                0.95,
+                rf"$\rho_s = {rho_s:+.2f}$",
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=export_config.annotation_fontsize,
+                bbox=ANNOT_BBOX,
+            )
+        ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+        ax.set_title("Maximum DIL diameter", pad=18)
+        ax.set_xlabel("DIL maximum 3D diameter (mm)")
+        ax.set_ylabel(r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$")
+        ax.set_ylim(*y_lim)
+        _style_axes(ax, export_config, x_minor_ticks=2)
+        _add_panel_label(ax, "A", export_config)
+
+        cat_specs = [
+            (axes_flat[1], "DIL DIL prostate sextant (AP)", ap_order, "AP lesion location", "B"),
+            (axes_flat[2], "DIL SI short", si_order, "SI lesion location", "C"),
+            (axes_flat[3], "DIL double sextant zone", double_sextant_order, "Double sextant zone", "D"),
+        ]
+        for ax, category_col, category_order, title, panel_label in cat_specs:
+            sub = df[df[category_col].isin(category_order)].copy()
+            boxplot_data = []
+            positions = np.arange(len(category_order), dtype=float)
+            for idx, category in enumerate(category_order):
+                cat_df = sub[sub[category_col] == category].copy()
+                values = cat_df[y_col].to_numpy(dtype=float)
+                boxplot_data.append(values)
+                xs = _spread_positions(len(values), positions[idx], half_width=0.12)
+                ax.scatter(
+                    xs,
+                    values,
+                    s=58,
+                    color=optimizer_color,
+                    edgecolor="white",
+                    linewidth=0.8,
+                    alpha=0.95,
+                    zorder=3,
+                )
+
+            bp = ax.boxplot(
+                boxplot_data,
+                positions=positions,
+                widths=0.50,
+                patch_artist=True,
+                showfliers=False,
+                medianprops={"color": "black", "linewidth": 1.4},
+                whiskerprops={"color": "#4a4a4a", "linewidth": 1.0},
+                capprops={"color": "#4a4a4a", "linewidth": 1.0},
+            )
+            for patch in bp["boxes"]:
+                patch.set_facecolor(optimizer_color)
+                patch.set_alpha(0.15)
+                patch.set_edgecolor(optimizer_color)
+                patch.set_linewidth(1.2)
+
+            ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+            ax.set_title(title, pad=18)
+            ax.set_xticks(positions, _category_tick_labels(sub, category_col, category_order))
+            if ax in {axes_flat[2]}:
+                ax.set_ylabel(r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$")
+            ax.set_ylim(*y_lim)
+            _style_axes(ax, export_config)
+            _add_panel_label(ax, panel_label, export_config)
+
+        fig.subplots_adjust(top=0.92, bottom=0.13, hspace=0.38, wspace=0.22)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)

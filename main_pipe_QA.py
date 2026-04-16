@@ -105,6 +105,10 @@ def main() -> None:
         qa_csv_dir / "qa_selected_profile_cases.csv",
         plot_data_outputs.qa_selected_profile_cases,
     )
+    _write_csv(
+        qa_csv_dir / "qa_family_optimizer_difficulty.csv",
+        plot_data_outputs.qa_family_optimizer_difficulty,
+    )
 
     figure_paths = {
         "headline_family_comparison": production_plots_QA.plot_headline_family_comparison(
@@ -136,6 +140,17 @@ def main() -> None:
             qa_fig_dir,
             export_config=export_config,
         ),
+        "selected_dil_profiles_step": production_plots_QA.plot_selected_dil_profiles_step(
+            plot_data_outputs.qa_plot_selected_profile_long,
+            plot_data_outputs.qa_selected_profile_cases,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
+        "optimizer_difficulty_summary": production_plots_QA.plot_optimizer_difficulty_summary(
+            plot_data_outputs.qa_family_optimizer_difficulty,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
     }
 
     inventory = _build_inventory(
@@ -157,6 +172,7 @@ def main() -> None:
             "qa_plot_safety_distance_long": plot_data_outputs.qa_plot_safety_distance_long,
             "qa_plot_selected_profile_long": plot_data_outputs.qa_plot_selected_profile_long,
             "qa_selected_profile_cases": plot_data_outputs.qa_selected_profile_cases,
+            "qa_family_optimizer_difficulty": plot_data_outputs.qa_family_optimizer_difficulty,
         }
     )
     _write_csv(manifests_dir / "qa_table_inventory.csv", inventory)

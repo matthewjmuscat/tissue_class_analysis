@@ -66,6 +66,7 @@ class QAPlotDataOutputs:
     qa_plot_safety_distance_long: pd.DataFrame
     qa_plot_selected_profile_long: pd.DataFrame
     qa_selected_profile_cases: pd.DataFrame
+    qa_family_optimizer_difficulty: pd.DataFrame
 
 
 def _alpha_code(index: int) -> str:
@@ -500,6 +501,128 @@ def build_selected_profile_long_df(
     ).reset_index(drop=True)
 
 
+def build_family_optimizer_difficulty_df(
+    family_outputs: QAFamilyOutputs,
+) -> pd.DataFrame:
+    ref_pairs = family_outputs.qa_family_reference_pairs.copy()
+    real_agg = family_outputs.qa_family_real_aggregated.copy()
+
+    family_context_source = family_outputs.qa_family_members_long.copy()
+    centroid_context = family_context_source[
+        family_context_source["Simulated type"].astype(str) == "Centroid DIL"
+    ].copy()
+    if centroid_context.empty:
+        centroid_context = family_context_source.drop_duplicates(
+            subset=["Base patient ID", "Relative DIL index"],
+            keep="first",
+        ).copy()
+
+    context_cols = [
+        "Base patient ID",
+        "Relative DIL index",
+        "Family ID",
+        "Family_real_core_count",
+        "DIL Volume",
+        "DIL Maximum 3D diameter",
+        "DIL Elongation",
+        "DIL Flatness",
+        "Prostate Volume",
+        "DIL DIL prostate sextant (LR)",
+        "DIL DIL prostate sextant (AP)",
+        "DIL DIL prostate sextant (SI)",
+        "DIL DIL centroid (X, prostate frame)",
+        "DIL DIL centroid (Y, prostate frame)",
+        "DIL DIL centroid (Z, prostate frame)",
+    ]
+    context_cols = [col for col in context_cols if col in centroid_context.columns]
+    family_context = centroid_context[context_cols].drop_duplicates(
+        subset=["Base patient ID", "Relative DIL index"],
+        keep="first",
+    )
+
+    out = ref_pairs.merge(
+        real_agg,
+        on=["Base patient ID", "Relative DIL index"],
+        how="left",
+        validate="1:1",
+    ).merge(
+        family_context,
+        on=["Base patient ID", "Relative DIL index"],
+        how="left",
+        validate="1:1",
+    )
+
+    out["delta_centroid_minus_real_mean__DIL Global Mean BE"] = (
+        out["centroid_DIL Global Mean BE"] - out["real_mean__DIL Global Mean BE"]
+    )
+    out["delta_optimal_minus_real_mean__DIL Global Mean BE"] = (
+        out["optimal_DIL Global Mean BE"] - out["real_mean__DIL Global Mean BE"]
+    )
+    out["optimizer_gain_mean__DIL Global Mean BE"] = (
+        out["delta_optimal_minus_centroid__DIL Global Mean BE"]
+    )
+    out["optimizer_gain_abs_mean__DIL Global Mean BE"] = (
+        out["optimizer_gain_mean__DIL Global Mean BE"].abs()
+    )
+
+    lr_map = {"Left": "L", "Right": "R"}
+    ap_map = {"Posterior": "P", "Anterior": "A"}
+    si_map = {
+        "Apex (Inferior)": "Apex",
+        "Mid": "Mid",
+        "Base (Superior)": "Base",
+    }
+    out["DIL LR short"] = out.get("DIL DIL prostate sextant (LR)", pd.Series(index=out.index)).map(lr_map)
+    out["DIL AP short"] = out.get("DIL DIL prostate sextant (AP)", pd.Series(index=out.index)).map(ap_map)
+    out["DIL SI short"] = out.get("DIL DIL prostate sextant (SI)", pd.Series(index=out.index)).map(si_map)
+    out["DIL double sextant zone"] = (
+        out["DIL LR short"].fillna("?") + out["DIL AP short"].fillna("?")
+    )
+
+    if "Family ID" not in out.columns:
+        out["Family ID"] = (
+            out["Base patient ID"].astype(str)
+            + "::"
+            + out["Relative DIL index"].astype("Int64").astype(str)
+        )
+
+    keep_order = [
+        "Base patient ID",
+        "Relative DIL index",
+        "Family ID",
+        "Family_real_core_count",
+        "centroid_DIL Global Mean BE",
+        "optimal_DIL Global Mean BE",
+        "real_mean__DIL Global Mean BE",
+        "delta_centroid_minus_real_mean__DIL Global Mean BE",
+        "delta_optimal_minus_real_mean__DIL Global Mean BE",
+        "optimizer_gain_mean__DIL Global Mean BE",
+        "optimizer_gain_abs_mean__DIL Global Mean BE",
+        "DIL Volume",
+        "DIL Maximum 3D diameter",
+        "DIL Elongation",
+        "DIL Flatness",
+        "Prostate Volume",
+        "DIL DIL prostate sextant (LR)",
+        "DIL DIL prostate sextant (AP)",
+        "DIL DIL prostate sextant (SI)",
+        "DIL LR short",
+        "DIL AP short",
+        "DIL SI short",
+        "DIL double sextant zone",
+        "DIL DIL centroid (X, prostate frame)",
+        "DIL DIL centroid (Y, prostate frame)",
+        "DIL DIL centroid (Z, prostate frame)",
+        "centroid_BX to DIL centroid distance",
+        "optimal_BX to DIL centroid distance",
+    ]
+    keep_order = [col for col in keep_order if col in out.columns]
+    return out[keep_order].sort_values(
+        ["optimizer_gain_abs_mean__DIL Global Mean BE", "Family ID"],
+        ascending=[False, True],
+    ).reset_index(drop=True)
+
+
 def build_qa_plot_data_outputs(
     source_tables: QASourceTables,
     family_outputs: QAFamilyOutputs,
@@ -520,4 +643,5 @@ def build_qa_plot_data_outputs(
             selected_profile_cases_df,
         ),
         qa_selected_profile_cases=selected_profile_cases_df,
+        qa_family_optimizer_difficulty=build_family_optimizer_difficulty_df(family_outputs),
     )
