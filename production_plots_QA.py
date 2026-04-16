@@ -54,15 +54,15 @@ MPL_FACE_RC = {
 }
 
 GROUP_COLOR_MAP = {
-    "Real": "#0b3b8a",
-    "Centroid": "#c75000",
-    "Optimal": "#2a9d8f",
+    "Real": "#244b79",
+    "Centroid": "#b26c3a",
+    "Optimal": "#3f8a82",
 }
 
 CONTRAST_COLOR_MAP = {
-    "centroid_minus_real": "#c75000",
-    "optimal_minus_real": "#2a9d8f",
-    "optimal_minus_centroid": "#7a5195",
+    "centroid_minus_real": "#b26c3a",
+    "optimal_minus_real": "#3f8a82",
+    "optimal_minus_centroid": "#77628b",
 }
 
 PAIR_LINE_COLOR = "#c7c7c7"
@@ -137,6 +137,26 @@ def _add_panel_label(
     )
 
 
+def _add_biopsy_heading(
+    ax,
+    label: str,
+    export_config: QAFigureExportConfig,
+    *,
+    x: float = 0.00,
+    y: float = 1.025,
+) -> None:
+    ax.text(
+        x,
+        y,
+        label,
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=export_config.title_fontsize + 3,
+        clip_on=False,
+    )
+
+
 def _add_outside_panel_box(
     fig: mpl.figure.Figure,
     ax,
@@ -174,8 +194,29 @@ def _style_axes(
     ax.yaxis.set_minor_locator(AutoMinorLocator(y_minor_ticks))
     if x_minor_ticks is not None:
         ax.xaxis.set_minor_locator(AutoMinorLocator(x_minor_ticks))
-    ax.tick_params(axis="both", which="minor", length=3, width=0.8)
-    ax.tick_params(axis="both", which="major", length=5, width=1.0)
+    ax.tick_params(
+        axis="both",
+        which="major",
+        length=5,
+        width=0.9,
+        direction="out",
+        bottom=True,
+        left=True,
+        top=False,
+        right=False,
+    )
+    ax.tick_params(
+        axis="both",
+        which="minor",
+        length=3,
+        width=0.6,
+        direction="out",
+        bottom=True,
+        left=True,
+        top=False,
+        right=False,
+    )
+    ax.tick_params(axis="y", which="both", labelleft=True)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
@@ -1122,8 +1163,7 @@ def _plot_selected_dil_profiles_impl(
             if panel_idx % 2 == 0:
                 ax.set_ylabel(r"Voxelwise DIL probability $\mathcal{P}_{D}(z)$")
             _style_axes(ax, export_config, x_minor_ticks=2)
-            ax.tick_params(axis="y", which="major", labelleft=True)
-            _add_panel_label(ax, heading, export_config, y=1.12)
+            _add_biopsy_heading(ax, heading, export_config)
             outside_box_specs.append((ax, _profile_box_text(case_df)))
 
         for ax in axes_flat[len(case_order):]:
@@ -1270,6 +1310,7 @@ def plot_optimizer_difficulty_summary(
         ax.set_ylabel(r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$")
         ax.set_ylim(*y_lim)
         _style_axes(ax, export_config, x_minor_ticks=2)
+        ax.tick_params(axis="y", which="both", labelleft=True)
         _add_panel_label(ax, "A", export_config)
 
         cat_specs = [
@@ -1320,6 +1361,149 @@ def plot_optimizer_difficulty_summary(
                 ax.set_ylabel(r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$")
             ax.set_ylim(*y_lim)
             _style_axes(ax, export_config)
+            ax.tick_params(axis="y", which="both", labelleft=True)
+            _add_panel_label(ax, panel_label, export_config)
+
+        fig.subplots_adjust(top=0.92, bottom=0.13, hspace=0.38, wspace=0.22)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+
+
+def plot_targeting_difficulty_summary(
+    family_difficulty_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_08_targeting_difficulty_summary",
+) -> list[Path]:
+    if family_difficulty_df.empty:
+        return []
+
+    df = family_difficulty_df.copy()
+    outcome_specs = [
+        (
+            "delta_centroid_minus_real_mean__DIL Global Mean BE",
+            CONTRAST_COLOR_MAP["centroid_minus_real"],
+            r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
+        ),
+        (
+            "delta_optimal_minus_real_mean__DIL Global Mean BE",
+            CONTRAST_COLOR_MAP["optimal_minus_real"],
+            r"Targeting difficulty $\Delta^{(O-R)}\langle \mathcal{P}_{D} \rangle$",
+        ),
+    ]
+    double_sextant_order = ["LP", "LA", "RP", "RA"]
+    y_vals = np.concatenate(
+        [
+            df[outcome_col].dropna().to_numpy(dtype=float)
+            for outcome_col, _, _ in outcome_specs
+            if outcome_col in df.columns
+        ]
+    )
+    y_min = float(np.nanmin(y_vals))
+    y_max = float(np.nanmax(y_vals))
+    y_span = max(y_max - y_min, 0.08)
+    y_lim = (
+        min(-0.02, y_min - 0.10 * y_span),
+        max(0.72, y_max + 0.12 * y_span),
+    )
+
+    with _font_rc(export_config):
+        fig, axes = plt.subplots(2, 2, figsize=(13.8, 9.0), dpi=export_config.dpi, sharey=True)
+        panel_specs = [
+            (axes[0, 0], "A", outcome_specs[0], "scatter"),
+            (axes[0, 1], "B", outcome_specs[0], "category"),
+            (axes[1, 0], "C", outcome_specs[1], "scatter"),
+            (axes[1, 1], "D", outcome_specs[1], "category"),
+        ]
+
+        for ax, panel_label, (outcome_col, color, y_label), panel_kind in panel_specs:
+            if panel_kind == "scatter":
+                sub = df.dropna(subset=["DIL Maximum 3D diameter", outcome_col]).copy()
+                x = sub["DIL Maximum 3D diameter"].to_numpy(dtype=float)
+                y = sub[outcome_col].to_numpy(dtype=float)
+                ax.scatter(
+                    x,
+                    y,
+                    s=62,
+                    color=color,
+                    edgecolor="white",
+                    linewidth=0.8,
+                    alpha=0.95,
+                    zorder=3,
+                )
+                if len(x) >= 2:
+                    x_grid = np.linspace(np.nanmin(x), np.nanmax(x), 200)
+                    slope, intercept = np.polyfit(x, y, deg=1)
+                    ax.plot(
+                        x_grid,
+                        intercept + slope * x_grid,
+                        color=color,
+                        linewidth=1.8,
+                        linestyle=(0, (5, 3)),
+                        zorder=2,
+                    )
+                    rho_s = pd.Series(x).corr(pd.Series(y), method="spearman")
+                    ax.text(
+                        0.03,
+                        0.95,
+                        rf"$\rho_s = {rho_s:+.2f}$",
+                        transform=ax.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=export_config.annotation_fontsize,
+                        bbox=ANNOT_BBOX,
+                    )
+                ax.set_title("Maximum DIL diameter", pad=18)
+                ax.set_xlabel("DIL maximum 3D diameter (mm)")
+                ax.set_ylabel(y_label)
+                ax.set_ylim(*y_lim)
+                ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+                _style_axes(ax, export_config, x_minor_ticks=2)
+                ax.tick_params(axis="y", which="both", labelleft=True)
+                _add_panel_label(ax, panel_label, export_config)
+                continue
+
+            sub = df[df["DIL double sextant zone"].isin(double_sextant_order)].copy()
+            positions = np.arange(len(double_sextant_order), dtype=float)
+            boxplot_data = []
+            for idx, category in enumerate(double_sextant_order):
+                cat_df = sub[sub["DIL double sextant zone"] == category].copy()
+                values = cat_df[outcome_col].to_numpy(dtype=float)
+                boxplot_data.append(values)
+                xs = _spread_positions(len(values), positions[idx], half_width=0.12)
+                ax.scatter(
+                    xs,
+                    values,
+                    s=58,
+                    color=color,
+                    edgecolor="white",
+                    linewidth=0.8,
+                    alpha=0.95,
+                    zorder=3,
+                )
+
+            bp = ax.boxplot(
+                boxplot_data,
+                positions=positions,
+                widths=0.50,
+                patch_artist=True,
+                showfliers=False,
+                medianprops={"color": "black", "linewidth": 1.4},
+                whiskerprops={"color": "#4a4a4a", "linewidth": 1.0},
+                capprops={"color": "#4a4a4a", "linewidth": 1.0},
+            )
+            for patch in bp["boxes"]:
+                patch.set_facecolor(color)
+                patch.set_alpha(0.15)
+                patch.set_edgecolor(color)
+                patch.set_linewidth(1.2)
+
+            ax.set_title("Double sextant zone", pad=18)
+            ax.set_xticks(positions, _category_tick_labels(sub, "DIL double sextant zone", double_sextant_order))
+            ax.set_ylim(*y_lim)
+            ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+            _style_axes(ax, export_config)
+            ax.tick_params(axis="y", which="both", labelleft=True)
             _add_panel_label(ax, panel_label, export_config)
 
         fig.subplots_adjust(top=0.92, bottom=0.13, hspace=0.38, wspace=0.22)

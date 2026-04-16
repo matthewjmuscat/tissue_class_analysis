@@ -109,6 +109,14 @@ def main() -> None:
         qa_csv_dir / "qa_family_optimizer_difficulty.csv",
         plot_data_outputs.qa_family_optimizer_difficulty,
     )
+    _write_csv(
+        qa_csv_dir / "qa_targeting_difficulty_correlations.csv",
+        plot_data_outputs.qa_targeting_difficulty_correlations,
+    )
+    _write_csv(
+        qa_csv_dir / "qa_targeting_difficulty_group_summary.csv",
+        plot_data_outputs.qa_targeting_difficulty_group_summary,
+    )
 
     figure_paths = {
         "headline_family_comparison": production_plots_QA.plot_headline_family_comparison(
@@ -151,6 +159,11 @@ def main() -> None:
             qa_fig_dir,
             export_config=export_config,
         ),
+        "targeting_difficulty_summary": production_plots_QA.plot_targeting_difficulty_summary(
+            plot_data_outputs.qa_family_optimizer_difficulty,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
     }
 
     inventory = _build_inventory(
@@ -173,6 +186,8 @@ def main() -> None:
             "qa_plot_selected_profile_long": plot_data_outputs.qa_plot_selected_profile_long,
             "qa_selected_profile_cases": plot_data_outputs.qa_selected_profile_cases,
             "qa_family_optimizer_difficulty": plot_data_outputs.qa_family_optimizer_difficulty,
+            "qa_targeting_difficulty_correlations": plot_data_outputs.qa_targeting_difficulty_correlations,
+            "qa_targeting_difficulty_group_summary": plot_data_outputs.qa_targeting_difficulty_group_summary,
         }
     )
     _write_csv(manifests_dir / "qa_table_inventory.csv", inventory)

@@ -67,6 +67,8 @@ class QAPlotDataOutputs:
     qa_plot_selected_profile_long: pd.DataFrame
     qa_selected_profile_cases: pd.DataFrame
     qa_family_optimizer_difficulty: pd.DataFrame
+    qa_targeting_difficulty_correlations: pd.DataFrame
+    qa_targeting_difficulty_group_summary: pd.DataFrame
 
 
 def _alpha_code(index: int) -> str:
@@ -527,6 +529,7 @@ def build_family_optimizer_difficulty_df(
         "DIL Elongation",
         "DIL Flatness",
         "Prostate Volume",
+        "DIL DIL centroid distance (prostate frame)",
         "DIL DIL prostate sextant (LR)",
         "DIL DIL prostate sextant (AP)",
         "DIL DIL prostate sextant (SI)",
@@ -603,6 +606,7 @@ def build_family_optimizer_difficulty_df(
         "DIL Elongation",
         "DIL Flatness",
         "Prostate Volume",
+        "DIL DIL centroid distance (prostate frame)",
         "DIL DIL prostate sextant (LR)",
         "DIL DIL prostate sextant (AP)",
         "DIL DIL prostate sextant (SI)",
@@ -623,6 +627,115 @@ def build_family_optimizer_difficulty_df(
     ).reset_index(drop=True)
 
 
+def build_targeting_difficulty_correlations_df(
+    family_difficulty_df: pd.DataFrame,
+) -> pd.DataFrame:
+    outcome_specs = {
+        "delta_centroid_minus_real_mean__DIL Global Mean BE": "centroid_minus_real",
+        "delta_optimal_minus_real_mean__DIL Global Mean BE": "optimal_minus_real",
+        "optimizer_gain_mean__DIL Global Mean BE": "optimal_minus_centroid",
+    }
+    feature_cols = [
+        "DIL Maximum 3D diameter",
+        "DIL Volume",
+        "DIL Elongation",
+        "DIL Flatness",
+        "DIL DIL centroid distance (prostate frame)",
+        "DIL DIL centroid (Z, prostate frame)",
+    ]
+
+    rows: list[dict[str, object]] = []
+    for outcome_col, outcome_key in outcome_specs.items():
+        if outcome_col not in family_difficulty_df.columns:
+            continue
+        for feature_col in feature_cols:
+            if feature_col not in family_difficulty_df.columns:
+                continue
+            sub = family_difficulty_df[[outcome_col, feature_col]].dropna().copy()
+            if sub.empty:
+                continue
+            rows.append(
+                {
+                    "outcome_col": outcome_col,
+                    "outcome_key": outcome_key,
+                    "feature_col": feature_col,
+                    "n": int(len(sub)),
+                    "spearman_rho": float(
+                        sub[feature_col].corr(sub[outcome_col], method="spearman")
+                    ),
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(
+            columns=["outcome_col", "outcome_key", "feature_col", "n", "spearman_rho"]
+        )
+    return pd.DataFrame(rows).sort_values(
+        ["outcome_key", "feature_col"]
+    ).reset_index(drop=True)
+
+
+def build_targeting_difficulty_group_summary_df(
+    family_difficulty_df: pd.DataFrame,
+) -> pd.DataFrame:
+    outcome_specs = {
+        "delta_centroid_minus_real_mean__DIL Global Mean BE": "centroid_minus_real",
+        "delta_optimal_minus_real_mean__DIL Global Mean BE": "optimal_minus_real",
+        "optimizer_gain_mean__DIL Global Mean BE": "optimal_minus_centroid",
+    }
+    group_cols = [
+        "DIL DIL prostate sextant (AP)",
+        "DIL DIL prostate sextant (SI)",
+        "DIL DIL prostate sextant (LR)",
+        "DIL double sextant zone",
+    ]
+
+    rows: list[dict[str, object]] = []
+    for outcome_col, outcome_key in outcome_specs.items():
+        if outcome_col not in family_difficulty_df.columns:
+            continue
+        for group_col in group_cols:
+            if group_col not in family_difficulty_df.columns:
+                continue
+            grouped = (
+                family_difficulty_df[[group_col, outcome_col]]
+                .dropna()
+                .groupby(group_col, sort=True)[outcome_col]
+            )
+            for category, values in grouped:
+                rows.append(
+                    {
+                        "outcome_col": outcome_col,
+                        "outcome_key": outcome_key,
+                        "group_col": group_col,
+                        "category": category,
+                        "n": int(values.count()),
+                        "mean": float(values.mean()),
+                        "median": float(values.median()),
+                        "min": float(values.min()),
+                        "max": float(values.max()),
+                    }
+                )
+
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "outcome_col",
+                "outcome_key",
+                "group_col",
+                "category",
+                "n",
+                "mean",
+                "median",
+                "min",
+                "max",
+            ]
+        )
+    return pd.DataFrame(rows).sort_values(
+        ["outcome_key", "group_col", "category"]
+    ).reset_index(drop=True)
+
+
 def build_qa_plot_data_outputs(
     source_tables: QASourceTables,
     family_outputs: QAFamilyOutputs,
@@ -633,6 +746,7 @@ def build_qa_plot_data_outputs(
         family_outputs,
         reference_disagreement_df,
     )
+    family_optimizer_difficulty_df = build_family_optimizer_difficulty_df(family_outputs)
     return QAPlotDataOutputs(
         qa_plot_family_comparison_long=build_family_comparison_long_df(family_outputs),
         qa_plot_headroom_long=build_headroom_long_df(stats_outputs),
@@ -643,5 +757,11 @@ def build_qa_plot_data_outputs(
             selected_profile_cases_df,
         ),
         qa_selected_profile_cases=selected_profile_cases_df,
-        qa_family_optimizer_difficulty=build_family_optimizer_difficulty_df(family_outputs),
+        qa_family_optimizer_difficulty=family_optimizer_difficulty_df,
+        qa_targeting_difficulty_correlations=build_targeting_difficulty_correlations_df(
+            family_optimizer_difficulty_df
+        ),
+        qa_targeting_difficulty_group_summary=build_targeting_difficulty_group_summary_df(
+            family_optimizer_difficulty_df
+        ),
     )
