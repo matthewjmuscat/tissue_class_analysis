@@ -4,6 +4,10 @@
 
 This document locks the design for the first dedicated QA manuscript and the first additive `qa/` lane in this repo.
 
+Notation for the manuscript and figures is locked separately in:
+
+- [QA_NOTATION.md](/home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/qa/QA_NOTATION.md)
+
 Scope of this document:
 
 - lock the paper 1 scientific question

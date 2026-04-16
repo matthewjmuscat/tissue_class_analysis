@@ -6,12 +6,13 @@ import numpy as np
 import pandas as pd
 
 from qa.families import QAFamilyOutputs
+from qa.notation import metric_math
 from qa.stats import HEADLINE_METRIC_COLUMNS, QAStatsOutputs
 
 
 HEADLINE_METRIC_LABEL_MAP = {
-    "DIL Global Mean BE": r"Mean DIL support, $\langle P_D \rangle$",
-    "DIL Global Max BE": r"Peak DIL support, $\max(P_D)$",
+    "DIL Global Mean BE": metric_math("DIL Global Mean BE"),
+    "DIL Global Max BE": metric_math("DIL Global Max BE"),
 }
 
 FAMILY_GROUP_ORDER = ("Real", "Centroid", "Optimal")

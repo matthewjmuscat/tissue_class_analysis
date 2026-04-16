@@ -14,8 +14,13 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import AutoMinorLocator
 
 from qa.config import QAFigureExportConfig
+from qa.notation import (
+    contrast_math,
+    family_display_math,
+    metric_math,
+    metric_with_family_math,
+)
 from qa.plot_data import (
-    CONTRAST_LABEL_MAP,
     CONTRAST_ORDER,
     FAMILY_GROUP_ORDER,
     HEADLINE_METRIC_COLUMNS,
@@ -102,13 +107,13 @@ def _save_figure_multi(
 
 def _add_panel_label(ax, label: str, export_config: QAFigureExportConfig) -> None:
     ax.text(
-        -0.12,
-        1.10,
+        -0.10,
+        1.095,
         label,
         transform=ax.transAxes,
         ha="left",
         va="top",
-        fontsize=export_config.panel_label_fontsize,
+        fontsize=export_config.panel_label_fontsize - 1,
         fontweight="bold",
         clip_on=False,
     )
@@ -214,12 +219,35 @@ def _shared_marker_legend() -> tuple[list[Line2D], list[str]]:
     ]
     labels = [
         "Matched real-core trajectory",
-        "Real",
-        "Centroid",
-        "Optimal",
+        family_display_math("Real"),
+        family_display_math("Centroid"),
+        family_display_math("Optimal"),
         "Group mean",
     ]
     return handles, labels
+
+
+def _summary_box_text(
+    summary_sub: pd.DataFrame | pd.Series,
+    *,
+    contrast_keys: Sequence[str],
+    include_p_values: bool = False,
+) -> str:
+    lines: list[str] = []
+    for contrast_key in contrast_keys:
+        if contrast_key not in summary_sub.index:
+            continue
+        row = summary_sub.loc[contrast_key]
+        base = (
+            rf"{contrast_math(contrast_key)} = {row['observed_mean_delta']:+.3f} "
+            rf"[{row['bootstrap_ci_lower']:.3f}, {row['bootstrap_ci_upper']:.3f}]"
+        )
+        if include_p_values:
+            base += f" {_format_p_value(float(row['bootstrap_p_two_sided']))}"
+        else:
+            base += f" {row['significance_label']}"
+        lines.append(base)
+    return "\n".join(lines)
 
 
 def plot_headline_family_comparison(
@@ -233,7 +261,7 @@ def plot_headline_family_comparison(
 ) -> list[Path]:
     metrics = list(metrics)
     with _font_rc(export_config):
-        fig, axes = plt.subplots(1, len(metrics), figsize=(14.0, 5.8), dpi=export_config.dpi)
+        fig, axes = plt.subplots(1, len(metrics), figsize=(14.2, 6.0), dpi=export_config.dpi)
         if len(metrics) == 1:
             axes = [axes]
 
@@ -245,7 +273,7 @@ def plot_headline_family_comparison(
                 ax.set_visible(False)
                 continue
 
-            metric_label = sub["metric_label"].iloc[0]
+            metric_label = metric_math(metric)
             y_values = sub["value"].to_numpy(dtype=float)
             value_min = float(np.nanmin(y_values))
             value_max = float(np.nanmax(y_values))
@@ -312,9 +340,16 @@ def plot_headline_family_comparison(
                     fontsize=export_config.annotation_fontsize + 1,
                 )
 
-            ax.set_title(metric_label, pad=30)
-            ax.set_ylabel("Core-level DIL score")
-            ax.set_xticks([0, 1, 2], list(FAMILY_GROUP_ORDER))
+            ax.set_title(metric_label, pad=38)
+            ax.set_ylabel("Core-level descriptor value")
+            ax.set_xticks(
+                [0, 1, 2],
+                [
+                    "Real\n$(R)$",
+                    "Centroid\n$(C)$",
+                    "Optimal\n$(O)$",
+                ],
+            )
             ax.set_xlim(-0.35, 2.35)
             ax.set_ylim(
                 min(0.0, value_min - 0.05 * span),
@@ -323,24 +358,24 @@ def plot_headline_family_comparison(
             _style_axes(ax, export_config)
             _add_panel_label(ax, chr(ord("A") + panel_idx), export_config)
 
-            stats_lines = []
-            for contrast_key, short_label in [
-                ("centroid_minus_real", "C - R"),
-                ("optimal_minus_real", "O - R"),
-                ("optimal_minus_centroid", "O - C"),
-            ]:
-                if contrast_key not in summary_sub.index:
-                    continue
-                stats_lines.append(_format_delta_line(summary_sub.loc[contrast_key], short_label))
             ax.text(
-                0.98,
-                0.97,
-                "\n".join(stats_lines),
+                1.02,
+                1.16,
+                _summary_box_text(
+                    summary_sub,
+                    contrast_keys=[
+                        "centroid_minus_real",
+                        "optimal_minus_real",
+                        "optimal_minus_centroid",
+                    ],
+                    include_p_values=False,
+                ),
                 transform=ax.transAxes,
                 ha="right",
                 va="top",
-                fontsize=export_config.annotation_fontsize,
+                fontsize=export_config.annotation_fontsize - 2,
                 bbox=ANNOT_BBOX,
+                clip_on=False,
             )
 
         fig.legend(
@@ -356,7 +391,7 @@ def plot_headline_family_comparison(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.80, bottom=0.16, wspace=0.28)
+        fig.subplots_adjust(top=0.70, bottom=0.16, wspace=0.30)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
 
 
@@ -373,7 +408,7 @@ def plot_headline_headroom(
     contrast_positions = {contrast: idx for idx, contrast in enumerate(CONTRAST_ORDER)}
 
     with _font_rc(export_config):
-        fig, axes = plt.subplots(1, len(metrics), figsize=(14.0, 5.8), dpi=export_config.dpi)
+        fig, axes = plt.subplots(1, len(metrics), figsize=(14.2, 6.0), dpi=export_config.dpi)
         if len(metrics) == 1:
             axes = [axes]
 
@@ -419,9 +454,9 @@ def plot_headline_headroom(
             ),
         ]
         legend_labels = [
-            CONTRAST_LABEL_MAP["centroid_minus_real"],
-            CONTRAST_LABEL_MAP["optimal_minus_real"],
-            CONTRAST_LABEL_MAP["optimal_minus_centroid"],
+            contrast_math("centroid_minus_real"),
+            contrast_math("optimal_minus_real"),
+            contrast_math("optimal_minus_centroid"),
             "Mean and 95% patient-cluster bootstrap CI",
         ]
 
@@ -431,7 +466,7 @@ def plot_headline_headroom(
                 ax.set_visible(False)
                 continue
 
-            metric_label = sub["metric_label"].iloc[0]
+            metric_label = metric_math(metric)
             summary_sub = bootstrap_summary_df[bootstrap_summary_df["metric"] == metric].copy()
             summary_sub = summary_sub.set_index("contrast_key")
 
@@ -506,14 +541,14 @@ def plot_headline_headroom(
                 )
 
             ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.1, linestyle=(0, (4, 3)), zorder=1)
-            ax.set_title(metric_label, pad=22)
-            ax.set_ylabel("Delta relative to matched comparator")
+            ax.set_title(metric_label, pad=36)
+            ax.set_ylabel("Matched-family delta")
             ax.set_xticks(
                 [0, 1, 2],
                 [
-                    "Centroid\n- Real",
-                    "Optimal\n- Real",
-                    "Optimal\n- Centroid",
+                    "$\\Delta^{(C-R)}$",
+                    "$\\Delta^{(O-R)}$",
+                    "$\\Delta^{(O-C)}$",
                 ],
             )
             ax.set_xlim(-0.5, 2.5)
@@ -524,29 +559,24 @@ def plot_headline_headroom(
             _style_axes(ax, export_config)
             _add_panel_label(ax, chr(ord("A") + panel_idx), export_config)
 
-            stats_lines = []
-            for contrast_key, short_label in [
-                ("centroid_minus_real", "C - R"),
-                ("optimal_minus_real", "O - R"),
-                ("optimal_minus_centroid", "O - C"),
-            ]:
-                if contrast_key not in summary_sub.index:
-                    continue
-                row = summary_sub.loc[contrast_key]
-                stats_lines.append(
-                    f"{short_label}: {row['observed_mean_delta']:+.3f} "
-                    f"[{row['bootstrap_ci_lower']:.3f}, {row['bootstrap_ci_upper']:.3f}] "
-                    f"{_format_p_value(float(row['bootstrap_p_two_sided']))}"
-                )
             ax.text(
-                0.98,
-                0.97,
-                "\n".join(stats_lines),
+                1.02,
+                1.16,
+                _summary_box_text(
+                    summary_sub,
+                    contrast_keys=[
+                        "centroid_minus_real",
+                        "optimal_minus_real",
+                        "optimal_minus_centroid",
+                    ],
+                    include_p_values=True,
+                ),
                 transform=ax.transAxes,
                 ha="right",
                 va="top",
-                fontsize=export_config.annotation_fontsize,
+                fontsize=export_config.annotation_fontsize - 2,
                 bbox=ANNOT_BBOX,
+                clip_on=False,
             )
 
         fig.legend(
@@ -562,7 +592,7 @@ def plot_headline_headroom(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.80, bottom=0.20, wspace=0.28)
+        fig.subplots_adjust(top=0.70, bottom=0.20, wspace=0.30)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
 
 
@@ -606,7 +636,7 @@ def plot_reference_disagreement(
         ]
         legend_labels = [
             "All lesion families",
-            f"Top {top_n_labels} |Optimal - Centroid| families",
+            rf"Top {top_n_labels} $|\Delta^{{(O-C)}}|$ families",
             "Identity line",
         ]
 
@@ -618,7 +648,7 @@ def plot_reference_disagreement(
                 ax.set_visible(False)
                 continue
 
-            metric_label = sub["metric_label"].iloc[0]
+            metric_label = metric_math(metric)
             x = sub["centroid_value"].to_numpy(dtype=float)
             y = sub["optimal_value"].to_numpy(dtype=float)
             low = max(0.0, min(np.nanmin(x), np.nanmin(y)) - 0.04)
@@ -675,9 +705,9 @@ def plot_reference_disagreement(
             max_abs_idx = sub["abs_delta_value"].idxmax()
             max_abs_row = sub.loc[max_abs_idx]
             stats_lines = [
-                f"Mean Delta: {mean_delta:+.3f}",
-                f"Median Delta: {median_delta:+.3f}",
-                f"Max |Delta|: {max_abs_row['abs_delta_value']:.3f}",
+                rf"$\overline{{\Delta}}^{{(O-C)}}$ = {mean_delta:+.3f}",
+                rf"$\mathrm{{med}}(\Delta^{{(O-C)}})$ = {median_delta:+.3f}",
+                rf"$\max |\Delta^{{(O-C)}}|$ = {max_abs_row['abs_delta_value']:.3f}",
                 f"Top family: {max_abs_row['Family display label']}",
             ]
 
@@ -692,9 +722,9 @@ def plot_reference_disagreement(
                 bbox=ANNOT_BBOX,
             )
 
-            ax.set_title(metric_label, pad=22)
-            ax.set_xlabel("Centroid reference score")
-            ax.set_ylabel("Optimal reference score")
+            ax.set_title(metric_label, pad=24)
+            ax.set_xlabel(metric_with_family_math(metric, "Centroid"))
+            ax.set_ylabel(metric_with_family_math(metric, "Optimal"))
             ax.set_xlim(low, high)
             ax.set_ylim(low, high)
             ax.set_aspect("equal", adjustable="box")
