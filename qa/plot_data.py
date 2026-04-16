@@ -255,6 +255,7 @@ def _pick_real_core_for_family(
     *,
     base_patient_id: str | int,
     relative_dil_index: str | int,
+    prefer_same_fraction: bool = True,
 ) -> pd.Series:
     sub = real_pairs[
         (real_pairs["Base patient ID"].astype(str) == str(base_patient_id))
@@ -267,6 +268,10 @@ def _pick_real_core_for_family(
         raise ValueError(
             f"No real-core rows found for family {base_patient_id}::{relative_dil_index}"
         )
+    if prefer_same_fraction and "same_fraction_with_references" in sub.columns:
+        same_fraction_sub = sub[sub["same_fraction_with_references"]].copy()
+        if not same_fraction_sub.empty:
+            sub = same_fraction_sub
     sort_cols = [
         "delta_optimal_minus_real__DIL Global Mean BE",
         "delta_optimal_minus_real__DIL Global Max BE",
@@ -282,6 +287,11 @@ def build_selected_profile_cases_df(
     reference_disagreement_df: pd.DataFrame,
 ) -> pd.DataFrame:
     real_pairs = family_outputs.qa_real_core_pairs.copy()
+    real_pairs["same_fraction_with_references"] = (
+        real_pairs["Patient ID"].astype(str) == real_pairs["centroid_Patient ID"].astype(str)
+    ) & (
+        real_pairs["Patient ID"].astype(str) == real_pairs["optimal_Patient ID"].astype(str)
+    )
     ref_sub = reference_disagreement_df[
         reference_disagreement_df["metric"] == "DIL Global Mean BE"
     ].copy()
@@ -303,6 +313,7 @@ def build_selected_profile_cases_df(
             real_pairs,
             base_patient_id=family_row["Base patient ID"],
             relative_dil_index=family_row["Relative DIL index"],
+            prefer_same_fraction=True,
         )
         used_families.add(str(family_row["Family ID"]))
         selected_rows.append(
@@ -349,7 +360,11 @@ def build_selected_profile_cases_df(
         "largest_negative_optimal_minus_centroid",
     )
 
-    headroom_candidates = real_pairs.loc[~real_pairs["Family ID"].isin(used_families)].sort_values(
+    headroom_candidate_pool = real_pairs.loc[~real_pairs["Family ID"].isin(used_families)].copy()
+    same_fraction_pool = headroom_candidate_pool[headroom_candidate_pool["same_fraction_with_references"]].copy()
+    if not same_fraction_pool.empty:
+        headroom_candidate_pool = same_fraction_pool
+    headroom_candidates = headroom_candidate_pool.sort_values(
         [
             "delta_optimal_minus_real__DIL Global Mean BE",
             "delta_optimal_minus_real__DIL Global Max BE",

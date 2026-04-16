@@ -66,6 +66,8 @@ GRID_COLOR = "#b8b8b8"
 REFERENCE_LINE_COLOR = "#6f6f6f"
 HIGHLIGHT_COLOR = "#c33d3d"
 FAMILY_FILL_ALPHA = 0.14
+DANGER_ZONE_COLOR = "#e5989b"
+PROVISIONAL_SAFETY_MARGIN_MM = 5.0
 ANNOT_BBOX = dict(
     facecolor="white",
     edgecolor="black",
@@ -161,8 +163,8 @@ def _style_axes(ax, export_config: QAFigureExportConfig, *, y_minor_ticks: int =
 
 def _format_delta_line(summary_row: pd.Series, short_label: str) -> str:
     return (
-        f"{short_label}: {summary_row['observed_mean_delta']:+.3f} "
-        f"[{summary_row['bootstrap_ci_lower']:.3f}, {summary_row['bootstrap_ci_upper']:.3f}] "
+        f"{short_label}: {summary_row['observed_mean_delta']:+.2f} "
+        f"[{summary_row['bootstrap_ci_lower']:.2f}, {summary_row['bootstrap_ci_upper']:.2f}] "
         f"{summary_row['significance_label']}"
     )
 
@@ -172,7 +174,7 @@ def _format_p_value(p_value: float) -> str:
         return "NA"
     if p_value < 0.001:
         return "p < 0.001"
-    return f"p = {p_value:.3f}"
+    return f"p = {p_value:.2f}"
 
 
 def _draw_significance_bracket(
@@ -269,8 +271,8 @@ def _summary_box_text(
             continue
         row = summary_sub.loc[contrast_key]
         base = (
-            rf"{contrast_math(contrast_key)} = {row['observed_mean_delta']:+.3f} "
-            rf"[{row['bootstrap_ci_lower']:.3f}, {row['bootstrap_ci_upper']:.3f}]"
+            rf"{contrast_math(contrast_key)} = {row['observed_mean_delta']:+.2f} "
+            rf"[{row['bootstrap_ci_lower']:.2f}, {row['bootstrap_ci_upper']:.2f}]"
         )
         if include_p_values:
             base += f" {_format_p_value(float(row['bootstrap_p_two_sided']))}"
@@ -371,7 +373,7 @@ def plot_headline_family_comparison(
                     fontsize=export_config.annotation_fontsize + 1,
                 )
 
-            ax.set_title(metric_label, pad=38)
+            ax.set_title(metric_label, pad=38, loc="left")
             ax.set_ylabel("Core-level descriptor value")
             ax.set_xticks(
                 [0, 1, 2],
@@ -407,7 +409,7 @@ def plot_headline_family_comparison(
             handles,
             labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.01),
+            bbox_to_anchor=(0.5, 0.965),
             ncol=len(labels),
             frameon=True,
             fancybox=True,
@@ -416,7 +418,7 @@ def plot_headline_family_comparison(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.62, bottom=0.16, wspace=0.30)
+        fig.subplots_adjust(top=0.72, bottom=0.16, wspace=0.30)
         for ax, text in outside_box_specs:
             _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.022)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
@@ -569,7 +571,7 @@ def plot_headline_headroom(
                 )
 
             ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.1, linestyle=(0, (4, 3)), zorder=1)
-            ax.set_title(metric_label, pad=36)
+            ax.set_title(metric_label, pad=36, loc="left")
             ax.set_ylabel("Matched-family delta")
             ax.set_xticks(
                 [0, 1, 2],
@@ -605,7 +607,7 @@ def plot_headline_headroom(
             legend_handles,
             legend_labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.01),
+            bbox_to_anchor=(0.5, 0.965),
             ncol=4,
             frameon=True,
             fancybox=True,
@@ -614,7 +616,7 @@ def plot_headline_headroom(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.62, bottom=0.20, wspace=0.30)
+        fig.subplots_adjust(top=0.72, bottom=0.20, wspace=0.30)
         for ax, text in outside_box_specs:
             _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.022)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
@@ -773,7 +775,10 @@ def plot_reference_disagreement(
 
 
 def _safety_min_box_text(metric: str, sub: pd.DataFrame) -> str:
-    lines = [r"All cohort minima $> 0$ mm"]
+    lines = [
+        r"All cohort minima $> 0$ mm",
+        rf"Provisional caution band: $0$-{PROVISIONAL_SAFETY_MARGIN_MM:.0f} mm",
+    ]
     for family_name in FAMILY_GROUP_ORDER:
         family_sub = sub[sub["group_key"] == family_name]
         if family_sub.empty:
@@ -801,6 +806,14 @@ def plot_safety_distance_family_comparison(
             axes = [axes]
 
         handles, labels = _shared_marker_legend()
+        handles = list(handles) + [
+            Patch(
+                facecolor=DANGER_ZONE_COLOR,
+                edgecolor=DANGER_ZONE_COLOR,
+                alpha=0.16,
+            )
+        ]
+        labels = list(labels) + [rf"Provisional {PROVISIONAL_SAFETY_MARGIN_MM:.0f} mm caution zone"]
         outside_box_specs: list[tuple[object, str]] = []
 
         for panel_idx, (ax, metric) in enumerate(zip(axes, metrics, strict=False)):
@@ -814,6 +827,20 @@ def plot_safety_distance_family_comparison(
             value_min = float(np.nanmin(y_values))
             value_max = float(np.nanmax(y_values))
             span = max(value_max - value_min, 1.0)
+            ax.axhspan(
+                0.0,
+                PROVISIONAL_SAFETY_MARGIN_MM,
+                color=DANGER_ZONE_COLOR,
+                alpha=0.16,
+                zorder=0,
+            )
+            ax.axhline(
+                PROVISIONAL_SAFETY_MARGIN_MM,
+                color=DANGER_ZONE_COLOR,
+                linewidth=1.0,
+                linestyle=(0, (4, 3)),
+                zorder=0.5,
+            )
 
             for _, obs_df in sub.groupby("Observation ID", sort=False):
                 obs_df = obs_df.sort_values("group_order")
@@ -877,7 +904,7 @@ def plot_safety_distance_family_comparison(
                 )
 
             ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.1, linestyle=(0, (4, 3)), zorder=1)
-            ax.set_title(metric_label, pad=38)
+            ax.set_title(metric_label, pad=38, loc="left")
             ax.set_ylabel("Mean nearest-neighbour distance (mm)")
             ax.set_xticks(
                 [0, 1, 2],
@@ -900,8 +927,8 @@ def plot_safety_distance_family_comparison(
             handles,
             labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.01),
-            ncol=len(labels),
+            bbox_to_anchor=(0.5, 0.955),
+            ncol=3,
             frameon=True,
             fancybox=True,
             facecolor="white",
@@ -909,7 +936,7 @@ def plot_safety_distance_family_comparison(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.62, bottom=0.18, wspace=0.30)
+        fig.subplots_adjust(top=0.72, bottom=0.18, wspace=0.30)
         for ax, text in outside_box_specs:
             _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.022)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
@@ -919,14 +946,12 @@ def _profile_box_text(case_df: pd.DataFrame) -> str:
     case_row = case_df.iloc[0]
     return "\n".join(
         [
-            f"Family: {case_row['Family ID']}",
-            f"Real core: {case_row['Selected real Bx ID']}",
             rf"{contrast_metric_math('DIL Global Mean BE', 'centroid_minus_real')} = "
-            rf"{float(case_row['Panel delta_centroid_minus_real__DIL Global Mean BE']):+.3f}",
+            rf"{float(case_row['Panel delta_centroid_minus_real__DIL Global Mean BE']):+.2f}",
             rf"{contrast_metric_math('DIL Global Mean BE', 'optimal_minus_real')} = "
-            rf"{float(case_row['Panel delta_optimal_minus_real__DIL Global Mean BE']):+.3f}",
+            rf"{float(case_row['Panel delta_optimal_minus_real__DIL Global Mean BE']):+.2f}",
             rf"{contrast_metric_math('DIL Global Mean BE', 'optimal_minus_centroid')} = "
-            rf"{float(case_row['Panel delta_optimal_minus_centroid__DIL Global Mean BE']):+.3f}",
+            rf"{float(case_row['Panel delta_optimal_minus_centroid__DIL Global Mean BE']):+.2f}",
         ]
     )
 
@@ -1027,7 +1052,7 @@ def plot_selected_dil_profiles(
             legend_handles,
             legend_labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.01),
+            bbox_to_anchor=(0.5, 0.985),
             ncol=4,
             frameon=True,
             fancybox=True,
@@ -1036,7 +1061,7 @@ def plot_selected_dil_profiles(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.84, bottom=0.12, hspace=0.42, wspace=0.18)
+        fig.subplots_adjust(top=0.84, bottom=0.12, hspace=0.52, wspace=0.18)
         for ax, text in outside_box_specs:
-            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.014)
+            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.010)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
