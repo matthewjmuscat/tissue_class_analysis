@@ -64,7 +64,7 @@ def main() -> None:
     source_tables = load_qa_source_tables(config)
     family_outputs = build_qa_family_outputs(source_tables)
     stats_outputs = build_qa_stats_outputs(family_outputs, config)
-    plot_data_outputs = build_qa_plot_data_outputs(family_outputs, stats_outputs)
+    plot_data_outputs = build_qa_plot_data_outputs(source_tables, family_outputs, stats_outputs)
 
     qa_csv_dir = dirs["csv"] / "qa"
     qa_fig_dir = dirs["figures"] / "qa"
@@ -78,6 +78,9 @@ def main() -> None:
     _write_csv(qa_csv_dir / "qa_headline_delta_long.csv", stats_outputs.headline_delta_long_df)
     _write_csv(qa_csv_dir / "qa_headline_bootstrap_summary.csv", stats_outputs.headline_bootstrap_summary_df)
     _write_csv(qa_csv_dir / "qa_headline_bootstrap_samples.csv", stats_outputs.headline_bootstrap_samples_df)
+    _write_csv(qa_csv_dir / "qa_safety_delta_long.csv", stats_outputs.safety_delta_long_df)
+    _write_csv(qa_csv_dir / "qa_safety_bootstrap_summary.csv", stats_outputs.safety_bootstrap_summary_df)
+    _write_csv(qa_csv_dir / "qa_safety_bootstrap_samples.csv", stats_outputs.safety_bootstrap_samples_df)
     _write_csv(
         qa_csv_dir / "qa_plot_family_comparison_long.csv",
         plot_data_outputs.qa_plot_family_comparison_long,
@@ -89,6 +92,18 @@ def main() -> None:
     _write_csv(
         qa_csv_dir / "qa_plot_reference_disagreement.csv",
         plot_data_outputs.qa_plot_reference_disagreement,
+    )
+    _write_csv(
+        qa_csv_dir / "qa_plot_safety_distance_long.csv",
+        plot_data_outputs.qa_plot_safety_distance_long,
+    )
+    _write_csv(
+        qa_csv_dir / "qa_plot_selected_profile_long.csv",
+        plot_data_outputs.qa_plot_selected_profile_long,
+    )
+    _write_csv(
+        qa_csv_dir / "qa_selected_profile_cases.csv",
+        plot_data_outputs.qa_selected_profile_cases,
     )
 
     figure_paths = {
@@ -109,6 +124,18 @@ def main() -> None:
             qa_fig_dir,
             export_config=export_config,
         ),
+        "safety_distance_family_comparison": production_plots_QA.plot_safety_distance_family_comparison(
+            plot_data_outputs.qa_plot_safety_distance_long,
+            stats_outputs.safety_bootstrap_summary_df,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
+        "selected_dil_profiles": production_plots_QA.plot_selected_dil_profiles(
+            plot_data_outputs.qa_plot_selected_profile_long,
+            plot_data_outputs.qa_selected_profile_cases,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
     }
 
     inventory = _build_inventory(
@@ -121,9 +148,15 @@ def main() -> None:
             "qa_headline_delta_long": stats_outputs.headline_delta_long_df,
             "qa_headline_bootstrap_summary": stats_outputs.headline_bootstrap_summary_df,
             "qa_headline_bootstrap_samples": stats_outputs.headline_bootstrap_samples_df,
+            "qa_safety_delta_long": stats_outputs.safety_delta_long_df,
+            "qa_safety_bootstrap_summary": stats_outputs.safety_bootstrap_summary_df,
+            "qa_safety_bootstrap_samples": stats_outputs.safety_bootstrap_samples_df,
             "qa_plot_family_comparison_long": plot_data_outputs.qa_plot_family_comparison_long,
             "qa_plot_headroom_long": plot_data_outputs.qa_plot_headroom_long,
             "qa_plot_reference_disagreement": plot_data_outputs.qa_plot_reference_disagreement,
+            "qa_plot_safety_distance_long": plot_data_outputs.qa_plot_safety_distance_long,
+            "qa_plot_selected_profile_long": plot_data_outputs.qa_plot_selected_profile_long,
+            "qa_selected_profile_cases": plot_data_outputs.qa_selected_profile_cases,
         }
     )
     _write_csv(manifests_dir / "qa_table_inventory.csv", inventory)

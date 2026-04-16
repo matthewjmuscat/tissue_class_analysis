@@ -11,11 +11,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.ticker import AutoMinorLocator
 
 from qa.config import QAFigureExportConfig
 from qa.notation import (
     contrast_math,
+    contrast_metric_math,
     family_display_math,
     metric_math,
     metric_with_family_math,
@@ -24,6 +26,7 @@ from qa.plot_data import (
     CONTRAST_ORDER,
     FAMILY_GROUP_ORDER,
     HEADLINE_METRIC_COLUMNS,
+    SAFETY_DISTANCE_METRIC_COLUMNS,
 )
 
 
@@ -62,6 +65,7 @@ PAIR_LINE_COLOR = "#c7c7c7"
 GRID_COLOR = "#b8b8b8"
 REFERENCE_LINE_COLOR = "#6f6f6f"
 HIGHLIGHT_COLOR = "#c33d3d"
+FAMILY_FILL_ALPHA = 0.14
 ANNOT_BBOX = dict(
     facecolor="white",
     edgecolor="black",
@@ -116,6 +120,32 @@ def _add_panel_label(ax, label: str, export_config: QAFigureExportConfig) -> Non
         fontsize=export_config.panel_label_fontsize - 1,
         fontweight="bold",
         clip_on=False,
+    )
+
+
+def _add_outside_panel_box(
+    fig: mpl.figure.Figure,
+    ax,
+    text: str | None,
+    export_config: QAFigureExportConfig,
+    *,
+    x_align: str = "right",
+    x_pad: float = 0.0,
+    y_pad: float = 0.020,
+) -> None:
+    if not text:
+        return
+    pos = ax.get_position()
+    x = pos.x1 + x_pad if x_align == "left" else pos.x1 - x_pad
+    fig.text(
+        x,
+        pos.y1 + y_pad,
+        text,
+        transform=fig.transFigure,
+        ha=x_align,
+        va="bottom",
+        fontsize=export_config.annotation_fontsize - 2,
+        bbox=ANNOT_BBOX,
     )
 
 
@@ -266,6 +296,7 @@ def plot_headline_family_comparison(
             axes = [axes]
 
         handles, labels = _shared_marker_legend()
+        outside_box_specs: list[tuple[object, str]] = []
 
         for panel_idx, (ax, metric) in enumerate(zip(axes, metrics, strict=False)):
             sub = family_comparison_long_df[family_comparison_long_df["metric"] == metric].copy()
@@ -357,32 +388,26 @@ def plot_headline_family_comparison(
             )
             _style_axes(ax, export_config)
             _add_panel_label(ax, chr(ord("A") + panel_idx), export_config)
-
-            ax.text(
-                1.02,
-                1.16,
-                _summary_box_text(
-                    summary_sub,
-                    contrast_keys=[
-                        "centroid_minus_real",
-                        "optimal_minus_real",
-                        "optimal_minus_centroid",
-                    ],
-                    include_p_values=False,
-                ),
-                transform=ax.transAxes,
-                ha="right",
-                va="top",
-                fontsize=export_config.annotation_fontsize - 2,
-                bbox=ANNOT_BBOX,
-                clip_on=False,
+            outside_box_specs.append(
+                (
+                    ax,
+                    _summary_box_text(
+                        summary_sub,
+                        contrast_keys=[
+                            "centroid_minus_real",
+                            "optimal_minus_real",
+                            "optimal_minus_centroid",
+                        ],
+                        include_p_values=False,
+                    ),
+                )
             )
 
         fig.legend(
             handles,
             labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.02),
+            bbox_to_anchor=(0.5, 1.01),
             ncol=len(labels),
             frameon=True,
             fancybox=True,
@@ -391,7 +416,9 @@ def plot_headline_family_comparison(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.70, bottom=0.16, wspace=0.30)
+        fig.subplots_adjust(top=0.62, bottom=0.16, wspace=0.30)
+        for ax, text in outside_box_specs:
+            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.022)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
 
 
@@ -411,6 +438,7 @@ def plot_headline_headroom(
         fig, axes = plt.subplots(1, len(metrics), figsize=(14.2, 6.0), dpi=export_config.dpi)
         if len(metrics) == 1:
             axes = [axes]
+        outside_box_specs: list[tuple[object, str]] = []
 
         legend_handles = [
             Line2D(
@@ -558,32 +586,26 @@ def plot_headline_headroom(
             )
             _style_axes(ax, export_config)
             _add_panel_label(ax, chr(ord("A") + panel_idx), export_config)
-
-            ax.text(
-                1.02,
-                1.16,
-                _summary_box_text(
-                    summary_sub,
-                    contrast_keys=[
-                        "centroid_minus_real",
-                        "optimal_minus_real",
-                        "optimal_minus_centroid",
-                    ],
-                    include_p_values=True,
-                ),
-                transform=ax.transAxes,
-                ha="right",
-                va="top",
-                fontsize=export_config.annotation_fontsize - 2,
-                bbox=ANNOT_BBOX,
-                clip_on=False,
+            outside_box_specs.append(
+                (
+                    ax,
+                    _summary_box_text(
+                        summary_sub,
+                        contrast_keys=[
+                            "centroid_minus_real",
+                            "optimal_minus_real",
+                            "optimal_minus_centroid",
+                        ],
+                        include_p_values=True,
+                    ),
+                )
             )
 
         fig.legend(
             legend_handles,
             legend_labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 1.02),
+            bbox_to_anchor=(0.5, 1.01),
             ncol=4,
             frameon=True,
             fancybox=True,
@@ -592,7 +614,9 @@ def plot_headline_headroom(
             framealpha=1.0,
             fontsize=export_config.legend_fontsize,
         )
-        fig.subplots_adjust(top=0.70, bottom=0.20, wspace=0.30)
+        fig.subplots_adjust(top=0.62, bottom=0.20, wspace=0.30)
+        for ax, text in outside_box_specs:
+            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.022)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
 
 
@@ -745,4 +769,274 @@ def plot_reference_disagreement(
             fontsize=export_config.legend_fontsize,
         )
         fig.subplots_adjust(top=0.80, bottom=0.16, wspace=0.24)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+
+
+def _safety_min_box_text(metric: str, sub: pd.DataFrame) -> str:
+    lines = [r"All cohort minima $> 0$ mm"]
+    for family_name in FAMILY_GROUP_ORDER:
+        family_sub = sub[sub["group_key"] == family_name]
+        if family_sub.empty:
+            continue
+        lines.append(
+            rf"$\min\,{metric_with_family_math(metric, family_name)[1:-1]} = "
+            rf"{float(family_sub['value'].min()):.2f}\ \mathrm{{mm}}$"
+        )
+    return "\n".join(lines)
+
+
+def plot_safety_distance_family_comparison(
+    safety_distance_long_df: pd.DataFrame,
+    bootstrap_summary_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_04_safety_distance_family_comparison",
+    metrics: Sequence[str] = SAFETY_DISTANCE_METRIC_COLUMNS,
+) -> list[Path]:
+    metrics = list(metrics)
+    with _font_rc(export_config):
+        fig, axes = plt.subplots(1, len(metrics), figsize=(14.2, 5.8), dpi=export_config.dpi)
+        if len(metrics) == 1:
+            axes = [axes]
+
+        handles, labels = _shared_marker_legend()
+        outside_box_specs: list[tuple[object, str]] = []
+
+        for panel_idx, (ax, metric) in enumerate(zip(axes, metrics, strict=False)):
+            sub = safety_distance_long_df[safety_distance_long_df["metric"] == metric].copy()
+            if sub.empty:
+                ax.set_visible(False)
+                continue
+
+            metric_label = metric_math(metric)
+            y_values = sub["value"].to_numpy(dtype=float)
+            value_min = float(np.nanmin(y_values))
+            value_max = float(np.nanmax(y_values))
+            span = max(value_max - value_min, 1.0)
+
+            for _, obs_df in sub.groupby("Observation ID", sort=False):
+                obs_df = obs_df.sort_values("group_order")
+                x_vals = obs_df["group_order"].to_numpy(dtype=float) + obs_df["pair_offset"].to_numpy(dtype=float)
+                ax.plot(
+                    x_vals,
+                    obs_df["value"].to_numpy(dtype=float),
+                    color=PAIR_LINE_COLOR,
+                    linewidth=1.0,
+                    alpha=0.8,
+                    zorder=1,
+                )
+
+            for group_order, group_key in enumerate(FAMILY_GROUP_ORDER):
+                group_df = sub[sub["group_key"] == group_key]
+                x_vals = (
+                    group_df["group_order"].to_numpy(dtype=float)
+                    + group_df["pair_offset"].to_numpy(dtype=float)
+                )
+                ax.scatter(
+                    x_vals,
+                    group_df["value"].to_numpy(dtype=float),
+                    s=36,
+                    color=GROUP_COLOR_MAP[group_key],
+                    edgecolor="white",
+                    linewidth=0.7,
+                    zorder=3,
+                )
+                mean_val = float(group_df["value"].mean())
+                ax.plot(
+                    [group_order - 0.17, group_order + 0.17],
+                    [mean_val, mean_val],
+                    color="black",
+                    linewidth=2.4,
+                    solid_capstyle="round",
+                    zorder=4,
+                )
+
+            summary_sub = bootstrap_summary_df[bootstrap_summary_df["metric"] == metric].copy()
+            summary_sub = summary_sub.set_index("contrast_key")
+            bracket_height = 0.06 * span
+            bracket_pad = 0.03 * span
+            bracket_y0 = value_max + 0.10 * span
+            bracket_specs = [
+                ("centroid_minus_real", 0.0, 1.0, bracket_y0),
+                ("optimal_minus_centroid", 1.0, 2.0, bracket_y0 + 0.18 * span),
+                ("optimal_minus_real", 0.0, 2.0, bracket_y0 + 0.36 * span),
+            ]
+            for contrast_key, x0, x1, y in bracket_specs:
+                if contrast_key not in summary_sub.index:
+                    continue
+                _draw_significance_bracket(
+                    ax,
+                    x0,
+                    x1,
+                    y,
+                    str(summary_sub.at[contrast_key, "significance_label"]),
+                    line_height=bracket_height,
+                    label_pad=bracket_pad,
+                    fontsize=export_config.annotation_fontsize + 1,
+                )
+
+            ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.1, linestyle=(0, (4, 3)), zorder=1)
+            ax.set_title(metric_label, pad=38)
+            ax.set_ylabel("Mean nearest-neighbour distance (mm)")
+            ax.set_xticks(
+                [0, 1, 2],
+                [
+                    "Real\n$(R)$",
+                    "Centroid\n$(C)$",
+                    "Optimal\n$(O)$",
+                ],
+            )
+            ax.set_xlim(-0.35, 2.35)
+            ax.set_ylim(
+                min(0.0, value_min - 0.12 * span),
+                value_max + 0.62 * span,
+            )
+            _style_axes(ax, export_config)
+            _add_panel_label(ax, chr(ord("A") + panel_idx), export_config)
+            outside_box_specs.append((ax, _safety_min_box_text(metric, sub)))
+
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=len(labels),
+            frameon=True,
+            fancybox=True,
+            facecolor="white",
+            edgecolor="black",
+            framealpha=1.0,
+            fontsize=export_config.legend_fontsize,
+        )
+        fig.subplots_adjust(top=0.62, bottom=0.18, wspace=0.30)
+        for ax, text in outside_box_specs:
+            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.022)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+
+
+def _profile_box_text(case_df: pd.DataFrame) -> str:
+    case_row = case_df.iloc[0]
+    return "\n".join(
+        [
+            f"Family: {case_row['Family ID']}",
+            f"Real core: {case_row['Selected real Bx ID']}",
+            rf"{contrast_metric_math('DIL Global Mean BE', 'centroid_minus_real')} = "
+            rf"{float(case_row['Panel delta_centroid_minus_real__DIL Global Mean BE']):+.3f}",
+            rf"{contrast_metric_math('DIL Global Mean BE', 'optimal_minus_real')} = "
+            rf"{float(case_row['Panel delta_optimal_minus_real__DIL Global Mean BE']):+.3f}",
+            rf"{contrast_metric_math('DIL Global Mean BE', 'optimal_minus_centroid')} = "
+            rf"{float(case_row['Panel delta_optimal_minus_centroid__DIL Global Mean BE']):+.3f}",
+        ]
+    )
+
+
+def plot_selected_dil_profiles(
+    selected_profile_long_df: pd.DataFrame,
+    selected_profile_cases_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_05_selected_dil_profiles",
+) -> list[Path]:
+    if selected_profile_long_df.empty or selected_profile_cases_df.empty:
+        return []
+
+    family_line_specs = {
+        "Real": {"color": GROUP_COLOR_MAP["Real"], "linestyle": "-", "linewidth": 2.2},
+        "Centroid": {"color": GROUP_COLOR_MAP["Centroid"], "linestyle": "-", "linewidth": 2.0},
+        "Optimal": {"color": GROUP_COLOR_MAP["Optimal"], "linestyle": "-", "linewidth": 2.0},
+    }
+
+    with _font_rc(export_config):
+        fig, axes = plt.subplots(2, 2, figsize=(13.8, 9.2), dpi=export_config.dpi, sharey=True)
+        axes_flat = list(np.ravel(axes))
+        legend_handles = [
+            Line2D([0], [0], color=GROUP_COLOR_MAP["Real"], linewidth=2.2),
+            Line2D([0], [0], color=GROUP_COLOR_MAP["Centroid"], linewidth=2.0),
+            Line2D([0], [0], color=GROUP_COLOR_MAP["Optimal"], linewidth=2.0),
+            Patch(facecolor="#6f6f6f", edgecolor="none", alpha=FAMILY_FILL_ALPHA),
+        ]
+        legend_labels = [
+            family_display_math("Real"),
+            family_display_math("Centroid"),
+            family_display_math("Optimal"),
+            "95% CI",
+        ]
+        outside_box_specs: list[tuple[object, str]] = []
+
+        case_order = (
+            selected_profile_cases_df.sort_values("Selection order")["Biopsy heading"].tolist()
+        )
+        case_df_map = {
+            heading: selected_profile_long_df[
+                selected_profile_long_df["Biopsy heading"].astype(str) == str(heading)
+            ].copy()
+            for heading in case_order
+        }
+
+        for panel_idx, (ax, heading) in enumerate(zip(axes_flat, case_order, strict=False)):
+            case_df = case_df_map[heading]
+            if case_df.empty:
+                ax.set_visible(False)
+                continue
+
+            x_min = float(case_df["Voxel begin (Z)"].min())
+            x_max = float(case_df["Voxel end (Z)"].max())
+            for family_name in FAMILY_GROUP_ORDER:
+                fam_df = case_df[case_df["Family group"] == family_name].sort_values("Voxel index")
+                if fam_df.empty:
+                    continue
+                x = fam_df["Voxel mid Z"].to_numpy(dtype=float)
+                y = fam_df["Binomial estimator"].to_numpy(dtype=float)
+                y_low = fam_df["CI lower vals"].to_numpy(dtype=float)
+                y_high = fam_df["CI upper vals"].to_numpy(dtype=float)
+                style = family_line_specs[family_name]
+                ax.fill_between(
+                    x,
+                    y_low,
+                    y_high,
+                    color=style["color"],
+                    alpha=FAMILY_FILL_ALPHA,
+                    linewidth=0,
+                    zorder=1,
+                )
+                ax.plot(
+                    x,
+                    y,
+                    color=style["color"],
+                    linewidth=style["linewidth"],
+                    linestyle=style["linestyle"],
+                    zorder=3,
+                )
+
+            ax.set_xlim(x_min - 0.4, x_max + 0.4)
+            ax.set_ylim(-0.02, 1.02)
+            ax.set_title(str(case_df["Selection reason"].iloc[0]), pad=24)
+            ax.set_xlabel(r"Axial position along biopsy $z$ (mm)")
+            if panel_idx % 2 == 0:
+                ax.set_ylabel(r"Voxelwise DIL probability $\mathcal{P}_{D}(z)$")
+            _style_axes(ax, export_config)
+            _add_panel_label(ax, heading, export_config)
+            outside_box_specs.append((ax, _profile_box_text(case_df)))
+
+        for ax in axes_flat[len(case_order):]:
+            ax.set_visible(False)
+
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=4,
+            frameon=True,
+            fancybox=True,
+            facecolor="white",
+            edgecolor="black",
+            framealpha=1.0,
+            fontsize=export_config.legend_fontsize,
+        )
+        fig.subplots_adjust(top=0.84, bottom=0.12, hspace=0.42, wspace=0.18)
+        for ax, text in outside_box_specs:
+            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.014)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)

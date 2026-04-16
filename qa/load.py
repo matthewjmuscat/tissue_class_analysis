@@ -25,6 +25,9 @@ class QASourceTables:
     cohort_sum_to_one_mc_results_df: pd.DataFrame
     cohort_3d_radiomic_features_all_oar_dil_df: pd.DataFrame
     cohort_tissue_class_distances_global_df: pd.DataFrame
+    cohort_tissue_class_distances_ptwise_df: pd.DataFrame
+    cohort_tissue_class_distances_voxelwise_df: pd.DataFrame
+    cohort_per_voxel_prostate_double_sextant_df: pd.DataFrame
 
 
 def resolve_qa_paths(config: QAStudyConfig) -> QADataPaths:
@@ -57,6 +60,15 @@ def load_qa_source_tables(config: QAStudyConfig | None = None) -> QASourceTables
         paths.cohort_csvs_directory / "Cohort: Tissue class - distances global results.csv",
         header_rows=[0, 1],
     )
+    cohort_tissue_class_distances_ptwise_df = load_files.load_csv_as_dataframe(
+        paths.cohort_csvs_directory / "Cohort: Tissue class - distances pt-wise results.csv"
+    )
+    cohort_tissue_class_distances_voxelwise_df = load_files.load_csv_as_dataframe(
+        paths.cohort_csvs_directory / "Cohort: Tissue class - distances voxel-wise results.csv"
+    )
+    cohort_per_voxel_prostate_double_sextant_df = load_files.load_csv_as_dataframe(
+        paths.cohort_csvs_directory / "Cohort: Per voxel prostate double sextant classification.csv"
+    )
 
     return QASourceTables(
         config=config,
@@ -66,4 +78,7 @@ def load_qa_source_tables(config: QAStudyConfig | None = None) -> QASourceTables
         cohort_sum_to_one_mc_results_df=cohort_sum_to_one_mc_results_df,
         cohort_3d_radiomic_features_all_oar_dil_df=cohort_3d_radiomic_features_all_oar_dil_df,
         cohort_tissue_class_distances_global_df=cohort_tissue_class_distances_global_df,
+        cohort_tissue_class_distances_ptwise_df=cohort_tissue_class_distances_ptwise_df,
+        cohort_tissue_class_distances_voxelwise_df=cohort_tissue_class_distances_voxelwise_df,
+        cohort_per_voxel_prostate_double_sextant_df=cohort_per_voxel_prostate_double_sextant_df,
     )

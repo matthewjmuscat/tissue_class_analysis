@@ -9,6 +9,11 @@ KEY_SECONDARY_ENDPOINT_COLUMNS = [
     "DIL Global Max BE",
 ]
 
+SAFETY_DISTANCE_ENDPOINT_COLUMNS = [
+    "Urethra NN dist mean",
+    "Rectum NN dist mean",
+]
+
 SECONDARY_QA_ENDPOINT_COLUMNS = [
     "DIL Global Q50 BE",
     "BX to DIL centroid (X)",
@@ -22,8 +27,7 @@ SECONDARY_QA_ENDPOINT_COLUMNS = [
     "Periprostatic Global Mean BE",
     "Urethral Global Mean BE",
     "Rectal Global Mean BE",
-    "Urethra NN dist mean",
-    "Rectum NN dist mean",
+    *SAFETY_DISTANCE_ENDPOINT_COLUMNS,
     "BX_to_prostate_centroid_distance_norm_mean_dim",
 ]
 

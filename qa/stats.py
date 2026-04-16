@@ -6,11 +6,16 @@ import numpy as np
 import pandas as pd
 
 from qa.config import QAStudyConfig
-from qa.endpoints import KEY_SECONDARY_ENDPOINT_COLUMNS, PRIMARY_ENDPOINT_COLUMNS
+from qa.endpoints import (
+    KEY_SECONDARY_ENDPOINT_COLUMNS,
+    PRIMARY_ENDPOINT_COLUMNS,
+    SAFETY_DISTANCE_ENDPOINT_COLUMNS,
+)
 from qa.families import QAFamilyOutputs
 
 
 HEADLINE_METRIC_COLUMNS = PRIMARY_ENDPOINT_COLUMNS + KEY_SECONDARY_ENDPOINT_COLUMNS
+SAFETY_DISTANCE_METRIC_COLUMNS = SAFETY_DISTANCE_ENDPOINT_COLUMNS
 CLUSTER_COL = "Base patient ID"
 
 
@@ -19,13 +24,19 @@ class QAStatsOutputs:
     headline_delta_long_df: pd.DataFrame
     headline_bootstrap_summary_df: pd.DataFrame
     headline_bootstrap_samples_df: pd.DataFrame
+    safety_delta_long_df: pd.DataFrame
+    safety_bootstrap_summary_df: pd.DataFrame
+    safety_bootstrap_samples_df: pd.DataFrame
 
 
-def _build_headline_delta_long(family_outputs: QAFamilyOutputs) -> pd.DataFrame:
+def _build_delta_long_for_metrics(
+    family_outputs: QAFamilyOutputs,
+    metric_columns: list[str] | tuple[str, ...],
+) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
 
     real_pairs = family_outputs.qa_real_core_pairs.copy()
-    for metric_col in HEADLINE_METRIC_COLUMNS:
+    for metric_col in metric_columns:
         if metric_col not in real_pairs.columns:
             continue
 
@@ -69,7 +80,7 @@ def _build_headline_delta_long(family_outputs: QAFamilyOutputs) -> pd.DataFrame:
         rows.append(optimal_df)
 
     ref_pairs = family_outputs.qa_family_reference_pairs.copy()
-    for metric_col in HEADLINE_METRIC_COLUMNS:
+    for metric_col in metric_columns:
         if f"centroid_{metric_col}" not in ref_pairs.columns or f"optimal_{metric_col}" not in ref_pairs.columns:
             continue
 
@@ -154,6 +165,7 @@ def _format_significance_label(p_value: float) -> str:
 
 def build_headline_bootstrap_summary(
     headline_delta_long_df: pd.DataFrame,
+    metric_columns: list[str] | tuple[str, ...],
     config: QAStudyConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     alpha = 1.0 - config.bootstrap_confidence_level
@@ -169,7 +181,7 @@ def build_headline_bootstrap_summary(
         "optimal_minus_centroid",
     ]
 
-    for metric_col in HEADLINE_METRIC_COLUMNS:
+    for metric_col in metric_columns:
         for contrast_key in contrast_order:
             sub = headline_delta_long_df[
                 (headline_delta_long_df["metric"] == metric_col)
@@ -243,13 +255,23 @@ def build_qa_stats_outputs(
     family_outputs: QAFamilyOutputs,
     config: QAStudyConfig,
 ) -> QAStatsOutputs:
-    headline_delta_long_df = _build_headline_delta_long(family_outputs)
+    headline_delta_long_df = _build_delta_long_for_metrics(family_outputs, HEADLINE_METRIC_COLUMNS)
     headline_bootstrap_summary_df, headline_bootstrap_samples_df = build_headline_bootstrap_summary(
         headline_delta_long_df,
+        HEADLINE_METRIC_COLUMNS,
+        config,
+    )
+    safety_delta_long_df = _build_delta_long_for_metrics(family_outputs, SAFETY_DISTANCE_METRIC_COLUMNS)
+    safety_bootstrap_summary_df, safety_bootstrap_samples_df = build_headline_bootstrap_summary(
+        safety_delta_long_df,
+        SAFETY_DISTANCE_METRIC_COLUMNS,
         config,
     )
     return QAStatsOutputs(
         headline_delta_long_df=headline_delta_long_df,
         headline_bootstrap_summary_df=headline_bootstrap_summary_df,
         headline_bootstrap_samples_df=headline_bootstrap_samples_df,
+        safety_delta_long_df=safety_delta_long_df,
+        safety_bootstrap_summary_df=safety_bootstrap_summary_df,
+        safety_bootstrap_samples_df=safety_bootstrap_samples_df,
     )
