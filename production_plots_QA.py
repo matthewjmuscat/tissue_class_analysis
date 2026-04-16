@@ -66,6 +66,7 @@ GRID_COLOR = "#b8b8b8"
 REFERENCE_LINE_COLOR = "#6f6f6f"
 HIGHLIGHT_COLOR = "#c33d3d"
 FAMILY_FILL_ALPHA = 0.14
+PROFILE_FILL_ALPHA = 0.24
 DANGER_ZONE_COLOR = "#e5989b"
 PROVISIONAL_SAFETY_MARGIN_MM = 5.0
 ANNOT_BBOX = dict(
@@ -111,10 +112,17 @@ def _save_figure_multi(
     return out_paths
 
 
-def _add_panel_label(ax, label: str, export_config: QAFigureExportConfig) -> None:
+def _add_panel_label(
+    ax,
+    label: str,
+    export_config: QAFigureExportConfig,
+    *,
+    x: float = -0.10,
+    y: float = 1.095,
+) -> None:
     ax.text(
-        -0.10,
-        1.095,
+        x,
+        y,
         label,
         transform=ax.transAxes,
         ha="left",
@@ -151,10 +159,17 @@ def _add_outside_panel_box(
     )
 
 
-def _style_axes(ax, export_config: QAFigureExportConfig, *, y_minor_ticks: int = 2) -> None:
+def _style_axes(
+    ax,
+    export_config: QAFigureExportConfig,
+    *,
+    y_minor_ticks: int = 2,
+    x_minor_ticks: int | None = None,
+) -> None:
     ax.grid(visible=True, which="major", linestyle="-", linewidth=0.6, color=GRID_COLOR, alpha=0.6)
-    ax.grid(visible=True, which="minor", linestyle="--", linewidth=0.4, color=GRID_COLOR, alpha=0.35)
     ax.yaxis.set_minor_locator(AutoMinorLocator(y_minor_ticks))
+    if x_minor_ticks is not None:
+        ax.xaxis.set_minor_locator(AutoMinorLocator(x_minor_ticks))
     ax.tick_params(axis="both", which="minor", length=3, width=0.8)
     ax.tick_params(axis="both", which="major", length=5, width=1.0)
     ax.spines["top"].set_visible(False)
@@ -373,8 +388,8 @@ def plot_headline_family_comparison(
                     fontsize=export_config.annotation_fontsize + 1,
                 )
 
-            ax.set_title(metric_label, pad=38, loc="left")
-            ax.set_ylabel("Core-level descriptor value")
+            ax.set_title("")
+            ax.set_ylabel(metric_label)
             ax.set_xticks(
                 [0, 1, 2],
                 [
@@ -409,7 +424,7 @@ def plot_headline_family_comparison(
             handles,
             labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.965),
+            bbox_to_anchor=(0.5, 0.94),
             ncol=len(labels),
             frameon=True,
             fancybox=True,
@@ -539,16 +554,18 @@ def plot_headline_headroom(
                 patch.set_edgecolor(CONTRAST_COLOR_MAP[contrast_key])
                 patch.set_linewidth(1.2)
 
+            ci_marker_offset = 0.28
             for contrast_key in CONTRAST_ORDER:
                 if contrast_key not in summary_sub.index:
                     continue
                 row = summary_sub.loc[contrast_key]
                 center = contrast_positions[contrast_key]
+                ci_center = center + ci_marker_offset
                 mean_val = float(row["observed_mean_delta"])
                 yerr_lower = mean_val - float(row["bootstrap_ci_lower"])
                 yerr_upper = float(row["bootstrap_ci_upper"]) - mean_val
                 ax.errorbar(
-                    center,
+                    ci_center,
                     mean_val,
                     yerr=np.array([[yerr_lower], [yerr_upper]]),
                     fmt="D",
@@ -557,6 +574,13 @@ def plot_headline_headroom(
                     ecolor="black",
                     elinewidth=1.2,
                     capsize=3.0,
+                    zorder=4,
+                )
+                ax.plot(
+                    [center + 0.24, ci_center - 0.03],
+                    [mean_val, mean_val],
+                    color="black",
+                    linewidth=0.8,
                     zorder=4,
                 )
                 ax.text(
@@ -571,8 +595,8 @@ def plot_headline_headroom(
                 )
 
             ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.1, linestyle=(0, (4, 3)), zorder=1)
-            ax.set_title(metric_label, pad=36, loc="left")
-            ax.set_ylabel("Matched-family delta")
+            ax.set_title("")
+            ax.set_ylabel(rf"Matched-family delta in {metric_label}")
             ax.set_xticks(
                 [0, 1, 2],
                 [
@@ -607,7 +631,7 @@ def plot_headline_headroom(
             legend_handles,
             legend_labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.965),
+            bbox_to_anchor=(0.5, 0.94),
             ncol=4,
             frameon=True,
             fancybox=True,
@@ -775,19 +799,13 @@ def plot_reference_disagreement(
 
 
 def _safety_min_box_text(metric: str, sub: pd.DataFrame) -> str:
-    lines = [
-        r"All cohort minima $> 0$ mm",
-        rf"Provisional caution band: $0$-{PROVISIONAL_SAFETY_MARGIN_MM:.0f} mm",
-    ]
+    minima_by_family: list[str] = []
     for family_name in FAMILY_GROUP_ORDER:
         family_sub = sub[sub["group_key"] == family_name]
         if family_sub.empty:
             continue
-        lines.append(
-            rf"$\min\,{metric_with_family_math(metric, family_name)[1:-1]} = "
-            rf"{float(family_sub['value'].min()):.2f}\ \mathrm{{mm}}$"
-        )
-    return "\n".join(lines)
+        minima_by_family.append(f"{family_name[0]}: {float(family_sub['value'].min()):.2f}")
+    return "Minima (mm) " + ", ".join(minima_by_family)
 
 
 def plot_safety_distance_family_comparison(
@@ -904,8 +922,8 @@ def plot_safety_distance_family_comparison(
                 )
 
             ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.1, linestyle=(0, (4, 3)), zorder=1)
-            ax.set_title(metric_label, pad=38, loc="left")
-            ax.set_ylabel("Mean nearest-neighbour distance (mm)")
+            ax.set_title("")
+            ax.set_ylabel(rf"Mean nearest-neighbour distance {metric_label} (mm)")
             ax.set_xticks(
                 [0, 1, 2],
                 [
@@ -927,7 +945,7 @@ def plot_safety_distance_family_comparison(
             handles,
             labels,
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.955),
+            bbox_to_anchor=(0.5, 0.965),
             ncol=3,
             frameon=True,
             fancybox=True,
@@ -1022,7 +1040,7 @@ def plot_selected_dil_profiles(
                     y_low,
                     y_high,
                     color=style["color"],
-                    alpha=FAMILY_FILL_ALPHA,
+                    alpha=PROFILE_FILL_ALPHA,
                     linewidth=0,
                     zorder=1,
                 )
@@ -1041,8 +1059,9 @@ def plot_selected_dil_profiles(
             ax.set_xlabel(r"Axial position along biopsy $z$ (mm)")
             if panel_idx % 2 == 0:
                 ax.set_ylabel(r"Voxelwise DIL probability $\mathcal{P}_{D}(z)$")
-            _style_axes(ax, export_config)
-            _add_panel_label(ax, heading, export_config)
+            _style_axes(ax, export_config, x_minor_ticks=2)
+            ax.tick_params(axis="y", which="major", labelleft=True)
+            _add_panel_label(ax, heading, export_config, y=1.12)
             outside_box_specs.append((ax, _profile_box_text(case_df)))
 
         for ax in axes_flat[len(case_order):]:
