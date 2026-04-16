@@ -41,8 +41,21 @@ def resolve_existing_output_dir(requested_path: Path) -> Path:
 class QAStudyConfig:
     main_output_path: Path = DEFAULT_MAIN_OUTPUT_PATH
     output_root: Path = REPO_ROOT / "output_data_QA"
+    figures_subdir: str = "figures"
     csv_subdir: str = "csv"
     manifest_subdir: str = "manifests"
     bootstrap_iterations: int = 10000
     bootstrap_seed: int = 20260415
     bootstrap_confidence_level: float = 0.95
+
+
+@dataclass(frozen=True)
+class QAFigureExportConfig:
+    save_formats: tuple[str, ...] = ("pdf", "svg")
+    dpi: int = 300
+    axes_label_fontsize: int = 16
+    tick_label_fontsize: int = 14
+    legend_fontsize: int = 12
+    annotation_fontsize: int = 12
+    title_fontsize: int = 17
+    panel_label_fontsize: int = 19
