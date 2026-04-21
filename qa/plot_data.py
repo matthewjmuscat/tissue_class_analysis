@@ -581,6 +581,12 @@ def build_family_optimizer_difficulty_df(
     out["DIL double sextant zone"] = (
         out["DIL LR short"].fillna("?") + out["DIL AP short"].fillna("?")
     )
+    out["DIL sextant zone 12"] = (
+        out["DIL LR short"].fillna("?")
+        + out["DIL AP short"].fillna("?")
+        + "-"
+        + out["DIL SI short"].fillna("?")
+    )
 
     if "Family ID" not in out.columns:
         out["Family ID"] = (
@@ -614,6 +620,7 @@ def build_family_optimizer_difficulty_df(
         "DIL AP short",
         "DIL SI short",
         "DIL double sextant zone",
+        "DIL sextant zone 12",
         "DIL DIL centroid (X, prostate frame)",
         "DIL DIL centroid (Y, prostate frame)",
         "DIL DIL centroid (Z, prostate frame)",
@@ -640,7 +647,9 @@ def build_targeting_difficulty_correlations_df(
         "DIL Volume",
         "DIL Elongation",
         "DIL Flatness",
+        "Prostate Volume",
         "DIL DIL centroid distance (prostate frame)",
+        "DIL DIL centroid (Y, prostate frame)",
         "DIL DIL centroid (Z, prostate frame)",
     ]
 
@@ -688,7 +697,29 @@ def build_targeting_difficulty_group_summary_df(
         "DIL DIL prostate sextant (SI)",
         "DIL DIL prostate sextant (LR)",
         "DIL double sextant zone",
+        "DIL sextant zone 12",
     ]
+
+    all_categories = {
+        "DIL DIL prostate sextant (LR)": ["Left", "Right"],
+        "DIL DIL prostate sextant (AP)": ["Posterior", "Anterior"],
+        "DIL DIL prostate sextant (SI)": ["Apex (Inferior)", "Mid", "Base (Superior)"],
+        "DIL double sextant zone": ["LP", "LA", "RP", "RA"],
+        "DIL sextant zone 12": [
+            "LP-Apex",
+            "LP-Mid",
+            "LP-Base",
+            "LA-Apex",
+            "LA-Mid",
+            "LA-Base",
+            "RP-Apex",
+            "RP-Mid",
+            "RP-Base",
+            "RA-Apex",
+            "RA-Mid",
+            "RA-Base",
+        ],
+    }
 
     rows: list[dict[str, object]] = []
     for outcome_col, outcome_key in outcome_specs.items():
@@ -702,18 +733,34 @@ def build_targeting_difficulty_group_summary_df(
                 .dropna()
                 .groupby(group_col, sort=True)[outcome_col]
             )
-            for category, values in grouped:
+            categories = all_categories.get(group_col)
+            if categories is None:
+                categories = grouped.groups.keys()
+            for category in categories:
+                if category in grouped.groups:
+                    values = grouped.get_group(category)
+                    count = int(values.count())
+                    mean = float(values.mean())
+                    median = float(values.median())
+                    min_val = float(values.min())
+                    max_val = float(values.max())
+                else:
+                    count = 0
+                    mean = np.nan
+                    median = np.nan
+                    min_val = np.nan
+                    max_val = np.nan
                 rows.append(
                     {
                         "outcome_col": outcome_col,
                         "outcome_key": outcome_key,
                         "group_col": group_col,
                         "category": category,
-                        "n": int(values.count()),
-                        "mean": float(values.mean()),
-                        "median": float(values.median()),
-                        "min": float(values.min()),
-                        "max": float(values.max()),
+                        "n": count,
+                        "mean": mean,
+                        "median": median,
+                        "min": min_val,
+                        "max": max_val,
                     }
                 )
 
@@ -736,6 +783,53 @@ def build_targeting_difficulty_group_summary_df(
     ).reset_index(drop=True)
 
 
+def apply_reference_case_labels(
+    reference_disagreement_df: pd.DataFrame,
+    selected_profile_cases_df: pd.DataFrame,
+    *,
+    top_n_labels: int = 4,
+) -> pd.DataFrame:
+    out = reference_disagreement_df.copy()
+    explicit_label_map: dict[str, str] = {}
+    if not selected_profile_cases_df.empty:
+        explicit_label_map = dict(
+            zip(
+                selected_profile_cases_df["Family ID"].astype(str),
+                selected_profile_cases_df["Biopsy heading"].astype(str),
+                strict=False,
+            )
+        )
+
+    top_family_ids: list[str] = []
+    for metric in out["metric"].dropna().astype(str).unique():
+        metric_sub = out[out["metric"].astype(str) == metric].copy()
+        top_family_ids.extend(
+            metric_sub.nlargest(top_n_labels, "abs_delta_value")["Family ID"].astype(str).tolist()
+        )
+
+    case_label_map = dict(explicit_label_map)
+    case_counter = 1
+    for family_id in dict.fromkeys(top_family_ids):
+        if family_id in case_label_map:
+            continue
+        case_label_map[family_id] = f"Case {case_counter}"
+        case_counter += 1
+
+    out["Family figure label"] = (
+        out["Family ID"].astype(str).map(case_label_map).fillna(out["Family display label"])
+    )
+    out["Family figure label source"] = np.where(
+        out["Family ID"].astype(str).isin(explicit_label_map),
+        "selected_profile_case",
+        np.where(
+            out["Family ID"].astype(str).isin(case_label_map),
+            "generic_case_label",
+            "raw_family_id",
+        ),
+    )
+    return out
+
+
 def build_qa_plot_data_outputs(
     source_tables: QASourceTables,
     family_outputs: QAFamilyOutputs,
@@ -745,6 +839,10 @@ def build_qa_plot_data_outputs(
     selected_profile_cases_df = build_selected_profile_cases_df(
         family_outputs,
         reference_disagreement_df,
+    )
+    reference_disagreement_df = apply_reference_case_labels(
+        reference_disagreement_df,
+        selected_profile_cases_df,
     )
     family_optimizer_difficulty_df = build_family_optimizer_difficulty_df(family_outputs)
     return QAPlotDataOutputs(

@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy import stats
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import AutoMinorLocator
@@ -80,6 +81,21 @@ ANNOT_BBOX = dict(
     linewidth=0.7,
     boxstyle="round,pad=0.25",
 )
+
+ALL_12_ZONE_ORDER = [
+    "LP-Apex",
+    "LP-Mid",
+    "LP-Base",
+    "LA-Apex",
+    "LA-Mid",
+    "LA-Base",
+    "RP-Apex",
+    "RP-Mid",
+    "RP-Base",
+    "RA-Apex",
+    "RA-Mid",
+    "RA-Base",
+]
 
 
 @contextmanager
@@ -272,6 +288,223 @@ def _spread_positions(n_points: int, center: float, half_width: float = 0.12) ->
     if n_points <= 1:
         return np.array([center], dtype=float)
     return np.linspace(center - half_width, center + half_width, n_points)
+
+
+def _jitter_positions(
+    n_points: int,
+    center: float,
+    *,
+    half_width: float = 0.12,
+    seed: int = 0,
+) -> np.ndarray:
+    if n_points <= 0:
+        return np.array([], dtype=float)
+    if n_points <= 1:
+        return np.array([center], dtype=float)
+    rng = np.random.default_rng(seed)
+    return center + rng.uniform(-half_width, half_width, size=n_points)
+
+
+def _rank_continuous_features(
+    df: pd.DataFrame,
+    *,
+    outcome_col: str,
+    feature_cols: Sequence[str],
+) -> list[tuple[str, float]]:
+    ranked: list[tuple[str, float]] = []
+    for feature_col in feature_cols:
+        if feature_col not in df.columns:
+            continue
+        sub = df[[feature_col, outcome_col]].dropna().copy()
+        if len(sub) < 4:
+            continue
+        rho = float(sub[feature_col].corr(sub[outcome_col], method="spearman"))
+        ranked.append((feature_col, abs(rho)))
+    return sorted(ranked, key=lambda item: item[1], reverse=True)
+
+
+def _rank_categorical_features(
+    df: pd.DataFrame,
+    *,
+    outcome_col: str,
+    feature_cols: Sequence[str],
+) -> list[tuple[str, float]]:
+    ranked: list[tuple[str, float]] = []
+    for feature_col in feature_cols:
+        if feature_col not in df.columns:
+            continue
+        grouped = (
+            df[[feature_col, outcome_col]]
+            .dropna()
+            .groupby(feature_col, sort=True)[outcome_col]
+            .median()
+        )
+        if len(grouped) < 2:
+            continue
+        spread = float(grouped.max() - grouped.min())
+        ranked.append((feature_col, spread))
+    return sorted(ranked, key=lambda item: item[1], reverse=True)
+
+
+def _format_regression_box(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    inv_units: str | None = None,
+) -> str:
+    fit = stats.linregress(x, y)
+    slope_units = "" if not inv_units else f" {inv_units}"
+    p_text = "p < 0.001" if fit.pvalue < 0.001 else f"p = {fit.pvalue:.2f}"
+    rho_s = pd.Series(x).corr(pd.Series(y), method="spearman")
+    return "\n".join(
+        [
+            rf"OLS slope = {fit.slope:+.3f}{slope_units}",
+            rf"$R^2 = {fit.rvalue ** 2:.2f}$, {p_text}",
+            rf"$\rho_s = {rho_s:+.2f}$",
+        ]
+    )
+
+
+def _draw_feature_regression_panel(
+    fig: mpl.figure.Figure,
+    ax,
+    df: pd.DataFrame,
+    *,
+    x_col: str,
+    y_col: str,
+    color: str,
+    x_label: str,
+    y_label: str,
+    panel_label: str,
+    export_config: QAFigureExportConfig,
+    y_lim: tuple[float, float],
+    inv_units: str | None = None,
+) -> str | None:
+    sub = df[[x_col, y_col]].dropna().copy()
+    x = sub[x_col].to_numpy(dtype=float)
+    y = sub[y_col].to_numpy(dtype=float)
+    summary_text: str | None = None
+    ax.scatter(
+        x,
+        y,
+        s=62,
+        color=color,
+        edgecolor="white",
+        linewidth=0.8,
+        alpha=0.95,
+        zorder=3,
+    )
+    if len(x) >= 2:
+        fit = stats.linregress(x, y)
+        x_grid = np.linspace(np.nanmin(x), np.nanmax(x), 200)
+        ax.plot(
+            x_grid,
+            fit.intercept + fit.slope * x_grid,
+            color=color,
+            linewidth=1.8,
+            linestyle=(0, (5, 3)),
+            zorder=2,
+        )
+        summary_text = _format_regression_box(x, y, inv_units=inv_units)
+    ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+    ax.set_title("")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_ylim(*y_lim)
+    _style_axes(ax, export_config, x_minor_ticks=2)
+    ax.tick_params(axis="y", which="both", labelleft=True)
+    _add_panel_label(ax, panel_label, export_config)
+    return summary_text
+
+
+def _draw_feature_category_panel(
+    ax,
+    df: pd.DataFrame,
+    *,
+    feature_col: str,
+    outcome_col: str,
+    color: str,
+    x_label: str,
+    panel_label: str,
+    export_config: QAFigureExportConfig,
+    y_label: str,
+    y_lim: tuple[float, float],
+    category_order: Sequence[str] | None = None,
+    display_map: dict[str, str] | None = None,
+    rotate_xticks: bool = False,
+    jitter_seed_base: int = 0,
+) -> None:
+    sub = df[[feature_col, outcome_col]].dropna().copy()
+    if category_order is None:
+        category_order = (
+            sub[feature_col]
+            .astype(str)
+            .value_counts()
+            .sort_index()
+            .index
+            .tolist()
+        )
+
+    sub[feature_col] = sub[feature_col].astype(str)
+    positions = np.arange(len(category_order), dtype=float)
+    boxplot_data: list[np.ndarray] = []
+    boxplot_positions: list[float] = []
+    for idx, category in enumerate(category_order):
+        cat_df = sub[sub[feature_col] == str(category)].copy()
+        values = cat_df[outcome_col].to_numpy(dtype=float)
+        if len(values) > 0:
+            boxplot_data.append(values)
+            boxplot_positions.append(float(positions[idx]))
+        xs = _jitter_positions(
+            len(values),
+            positions[idx],
+            half_width=0.12,
+            seed=jitter_seed_base + 97 * (idx + 1) + len(values),
+        )
+        ax.scatter(
+            xs,
+            values,
+            s=58,
+            color=color,
+            edgecolor="white",
+            linewidth=0.8,
+            alpha=0.95,
+            zorder=3,
+        )
+
+    if boxplot_data:
+        bp = ax.boxplot(
+            boxplot_data,
+            positions=boxplot_positions,
+            widths=0.58,
+            patch_artist=True,
+            showfliers=False,
+            medianprops={"color": "black", "linewidth": 1.4},
+            whiskerprops={"color": "#4a4a4a", "linewidth": 1.0},
+            capprops={"color": "#4a4a4a", "linewidth": 1.0},
+        )
+        for patch in bp["boxes"]:
+            patch.set_facecolor(color)
+            patch.set_alpha(0.15)
+            patch.set_edgecolor(color)
+            patch.set_linewidth(1.2)
+
+    counts = sub[feature_col].value_counts()
+    tick_labels = []
+    for cat in category_order:
+        display = display_map.get(str(cat), str(cat)) if display_map else str(cat)
+        tick_labels.append(f"{display}\n(n={int(counts.get(cat, 0))})")
+    ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+    ax.set_title("")
+    ax.set_xticks(positions, tick_labels)
+    if rotate_xticks:
+        ax.tick_params(axis="x", labelrotation=28)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_ylim(*y_lim)
+    _style_axes(ax, export_config)
+    ax.tick_params(axis="y", which="both", labelleft=True)
+    _add_panel_label(ax, panel_label, export_config)
 
 
 def _shared_marker_legend() -> tuple[list[Line2D], list[str]]:
@@ -742,6 +975,11 @@ def plot_reference_disagreement(
             if sub.empty:
                 ax.set_visible(False)
                 continue
+            label_col = (
+                "Family figure label"
+                if "Family figure label" in sub.columns
+                else "Family display label"
+            )
 
             metric_label = metric_math(metric)
             x = sub["centroid_value"].to_numpy(dtype=float)
@@ -775,7 +1013,7 @@ def plot_reference_disagreement(
                 for idx, (_, row) in enumerate(highlight_df.iterrows()):
                     dx, dy = annotation_offsets[idx % len(annotation_offsets)]
                     txt = ax.annotate(
-                        str(row["Family display label"]),
+                        str(row[label_col]),
                         xy=(row["centroid_value"], row["optimal_value"]),
                         xytext=(dx, dy),
                         textcoords="offset points",
@@ -803,7 +1041,7 @@ def plot_reference_disagreement(
                 rf"$\overline{{\Delta}}^{{(O-C)}}$ = {mean_delta:+.3f}",
                 rf"$\mathrm{{med}}(\Delta^{{(O-C)}})$ = {median_delta:+.3f}",
                 rf"$\max |\Delta^{{(O-C)}}|$ = {max_abs_row['abs_delta_value']:.3f}",
-                f"Top family: {max_abs_row['Family display label']}",
+                f"Top family: {max_abs_row[label_col]}",
             ]
 
             ax.text(
@@ -1239,6 +1477,256 @@ def _category_tick_labels(sub: pd.DataFrame, category_col: str, category_order: 
     return labels
 
 
+CONTINUOUS_FEATURE_SPECS = {
+    "DIL Volume": {
+        "x_label": r"DIL volume (mm$^3$)",
+        "inv_units": r"mm$^{-3}$",
+    },
+    "DIL Maximum 3D diameter": {
+        "x_label": r"DIL maximum 3D diameter (mm)",
+        "inv_units": r"mm$^{-1}$",
+    },
+    "Prostate Volume": {
+        "x_label": r"Prostate volume (mm$^3$)",
+        "inv_units": r"mm$^{-3}$",
+    },
+    "DIL DIL centroid (Y, prostate frame)": {
+        "x_label": r"DIL AP centroid coordinate $y$"
+        "\n"
+        r"[Posterior(+), Anterior(-)] (mm)",
+        "inv_units": r"mm$^{-1}$",
+    },
+    "DIL DIL centroid distance (prostate frame)": {
+        "x_label": r"DIL centroid distance from prostate-frame origin (mm)",
+        "inv_units": r"mm$^{-1}$",
+    },
+    "DIL DIL centroid (Z, prostate frame)": {
+        "x_label": r"DIL SI centroid coordinate $z$ (mm)",
+        "inv_units": r"mm$^{-1}$",
+    },
+}
+
+COARSE_CATEGORY_SPECS = {
+    "DIL DIL prostate sextant (LR)": {
+        "x_label": "Left-right lesion location",
+        "order": ["Left", "Right"],
+        "display_map": {"Left": "Left", "Right": "Right"},
+        "rotate_xticks": False,
+    },
+    "DIL DIL prostate sextant (AP)": {
+        "x_label": "Anterior-posterior lesion location",
+        "order": ["Posterior", "Anterior"],
+        "display_map": {"Posterior": "Post", "Anterior": "Ant"},
+        "rotate_xticks": False,
+    },
+    "DIL DIL prostate sextant (SI)": {
+        "x_label": "Superior-inferior lesion location",
+        "order": ["Apex (Inferior)", "Mid", "Base (Superior)"],
+        "display_map": {
+            "Apex (Inferior)": "Apex",
+            "Mid": "Mid",
+            "Base (Superior)": "Base",
+        },
+        "rotate_xticks": False,
+    },
+    "DIL double sextant zone": {
+        "x_label": "Double-sextant lesion location",
+        "order": ["LP", "LA", "RP", "RA"],
+        "display_map": {"LP": "LP", "LA": "LA", "RP": "RP", "RA": "RA"},
+        "rotate_xticks": False,
+    },
+}
+
+
+def _difficulty_y_limits(
+    df: pd.DataFrame,
+    y_col: str,
+    *,
+    low_floor: float,
+    high_floor: float,
+) -> tuple[float, float]:
+    y_vals = df[y_col].dropna().to_numpy(dtype=float)
+    y_min = float(np.nanmin(y_vals))
+    y_max = float(np.nanmax(y_vals))
+    y_span = max(y_max - y_min, 0.08)
+    return (
+        min(low_floor, y_min - 0.10 * y_span),
+        max(high_floor, y_max + 0.12 * y_span),
+    )
+
+
+def _top_continuous_features(
+    df: pd.DataFrame,
+    *,
+    outcome_col: str,
+    n_features: int,
+) -> list[str]:
+    ranked = _rank_continuous_features(
+        df,
+        outcome_col=outcome_col,
+        feature_cols=tuple(CONTINUOUS_FEATURE_SPECS.keys()),
+    )
+    selected = [feature for feature, _ in ranked[:n_features]]
+    if len(selected) < n_features:
+        for feature in CONTINUOUS_FEATURE_SPECS:
+            if feature not in selected and feature in df.columns:
+                selected.append(feature)
+            if len(selected) == n_features:
+                break
+    return selected
+
+
+def _plot_difficulty_continuous_grid(
+    df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    y_col: str,
+    y_label: str,
+    color: str,
+    y_lim: tuple[float, float],
+    export_config: QAFigureExportConfig,
+    file_stem: str,
+) -> list[Path]:
+    selected_features = _top_continuous_features(df, outcome_col=y_col, n_features=4)
+    if not selected_features:
+        return []
+
+    with _font_rc(export_config):
+        fig, axes = plt.subplots(2, 2, figsize=(14.8, 9.2), dpi=export_config.dpi, sharey=True)
+        axes_flat = list(np.ravel(axes))
+        outside_box_specs: list[tuple[object, str]] = []
+
+        for panel_idx, (ax, feature_col) in enumerate(zip(axes_flat, selected_features, strict=False)):
+            feature_spec = CONTINUOUS_FEATURE_SPECS[feature_col]
+            summary_text = _draw_feature_regression_panel(
+                fig,
+                ax,
+                df,
+                x_col=feature_col,
+                y_col=y_col,
+                color=color,
+                x_label=str(feature_spec["x_label"]),
+                y_label=y_label if panel_idx % 2 == 0 else "",
+                panel_label=chr(ord("A") + panel_idx),
+                export_config=export_config,
+                y_lim=y_lim,
+                inv_units=str(feature_spec["inv_units"]),
+            )
+            if summary_text:
+                outside_box_specs.append((ax, summary_text))
+
+        for ax in axes_flat[len(selected_features):]:
+            ax.set_visible(False)
+
+        fig.subplots_adjust(top=0.89, bottom=0.12, hspace=0.46, wspace=0.24)
+        for ax, text in outside_box_specs:
+            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.010)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+
+
+def _plot_difficulty_categorical_grid(
+    df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    y_col: str,
+    y_label: str,
+    color: str,
+    y_lim: tuple[float, float],
+    export_config: QAFigureExportConfig,
+    file_stem: str,
+) -> list[Path]:
+    with _font_rc(export_config):
+        fig, axes = plt.subplots(2, 2, figsize=(14.8, 9.2), dpi=export_config.dpi, sharey=True)
+        axes_flat = list(np.ravel(axes))
+
+        for panel_idx, (ax, feature_col) in enumerate(
+            zip(axes_flat, COARSE_CATEGORY_SPECS.keys(), strict=False)
+        ):
+            feature_spec = COARSE_CATEGORY_SPECS[feature_col]
+            _draw_feature_category_panel(
+                ax,
+                df,
+                feature_col=feature_col,
+                outcome_col=y_col,
+                color=color,
+                x_label=str(feature_spec["x_label"]),
+                panel_label=chr(ord("A") + panel_idx),
+                export_config=export_config,
+                y_label=y_label if panel_idx % 2 == 0 else "",
+                y_lim=y_lim,
+                category_order=feature_spec["order"],
+                display_map=feature_spec["display_map"],
+                rotate_xticks=bool(feature_spec["rotate_xticks"]),
+                jitter_seed_base=2400 + 101 * panel_idx,
+            )
+
+        fig.subplots_adjust(top=0.93, bottom=0.12, hspace=0.42, wspace=0.20)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+
+
+def _plot_difficulty_mixed_summary(
+    df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    y_col: str,
+    y_label: str,
+    color: str,
+    y_lim: tuple[float, float],
+    export_config: QAFigureExportConfig,
+    file_stem: str,
+) -> list[Path]:
+    selected_continuous = _top_continuous_features(df, outcome_col=y_col, n_features=3)
+    if not selected_continuous:
+        return []
+
+    with _font_rc(export_config):
+        fig = plt.figure(figsize=(15.2, 9.2), dpi=export_config.dpi)
+        gs = fig.add_gridspec(2, 3, height_ratios=[1.0, 1.08], hspace=0.42, wspace=0.30)
+        top_axes = [fig.add_subplot(gs[0, idx]) for idx in range(3)]
+        bottom_ax = fig.add_subplot(gs[1, :])
+        outside_box_specs: list[tuple[object, str]] = []
+
+        for panel_idx, (ax, feature_col) in enumerate(zip(top_axes, selected_continuous, strict=False)):
+            feature_spec = CONTINUOUS_FEATURE_SPECS[feature_col]
+            summary_text = _draw_feature_regression_panel(
+                fig,
+                ax,
+                df,
+                x_col=feature_col,
+                y_col=y_col,
+                color=color,
+                x_label=str(feature_spec["x_label"]),
+                y_label=y_label,
+                panel_label=chr(ord("A") + panel_idx),
+                export_config=export_config,
+                y_lim=y_lim,
+                inv_units=str(feature_spec["inv_units"]),
+            )
+            if summary_text:
+                outside_box_specs.append((ax, summary_text))
+
+        _draw_feature_category_panel(
+            bottom_ax,
+            df,
+            feature_col="DIL sextant zone 12",
+            outcome_col=y_col,
+            color=color,
+            x_label="12-zone lesion location",
+            panel_label="D",
+            export_config=export_config,
+            y_label=y_label,
+            y_lim=y_lim,
+            category_order=ALL_12_ZONE_ORDER,
+            rotate_xticks=True,
+            jitter_seed_base=1707,
+        )
+
+        fig.subplots_adjust(top=0.90, bottom=0.14)
+        for ax, text in outside_box_specs:
+            _add_outside_panel_box(fig, ax, text, export_config, y_pad=0.010)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+
+
 def plot_optimizer_difficulty_summary(
     optimizer_difficulty_df: pd.DataFrame,
     save_dir: str | Path,
@@ -1251,121 +1739,17 @@ def plot_optimizer_difficulty_summary(
 
     df = optimizer_difficulty_df.copy()
     y_col = "optimizer_gain_mean__DIL Global Mean BE"
-    optimizer_color = CONTRAST_COLOR_MAP["optimal_minus_centroid"]
-    double_sextant_order = ["LP", "LA", "RP", "RA"]
-    ap_order = ["Posterior", "Anterior"]
-    si_order = ["Apex", "Mid", "Base"]
-
-    with _font_rc(export_config):
-        fig, axes = plt.subplots(2, 2, figsize=(13.8, 9.0), dpi=export_config.dpi, sharey=True)
-        axes_flat = list(np.ravel(axes))
-        y_vals = df[y_col].to_numpy(dtype=float)
-        y_min = float(np.nanmin(y_vals))
-        y_max = float(np.nanmax(y_vals))
-        y_span = max(y_max - y_min, 0.08)
-        y_lim = (
-            min(-0.14, y_min - 0.10 * y_span),
-            max(0.10, y_max + 0.12 * y_span),
-        )
-
-        ax = axes_flat[0]
-        scatter_df = df.dropna(subset=["DIL Maximum 3D diameter", y_col]).copy()
-        x = scatter_df["DIL Maximum 3D diameter"].to_numpy(dtype=float)
-        y = scatter_df[y_col].to_numpy(dtype=float)
-        ax.scatter(
-            x,
-            y,
-            s=62,
-            color=optimizer_color,
-            edgecolor="white",
-            linewidth=0.8,
-            alpha=0.95,
-            zorder=3,
-        )
-        if len(x) >= 2:
-            x_grid = np.linspace(np.nanmin(x), np.nanmax(x), 200)
-            slope, intercept = np.polyfit(x, y, deg=1)
-            ax.plot(
-                x_grid,
-                intercept + slope * x_grid,
-                color=optimizer_color,
-                linewidth=1.8,
-                linestyle=(0, (5, 3)),
-                zorder=2,
-            )
-            rho_s = pd.Series(x).corr(pd.Series(y), method="spearman")
-            ax.text(
-                0.03,
-                0.95,
-                rf"$\rho_s = {rho_s:+.2f}$",
-                transform=ax.transAxes,
-                ha="left",
-                va="top",
-                fontsize=export_config.annotation_fontsize,
-                bbox=ANNOT_BBOX,
-            )
-        ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
-        ax.set_title("Maximum DIL diameter", pad=18)
-        ax.set_xlabel("DIL maximum 3D diameter (mm)")
-        ax.set_ylabel(r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$")
-        ax.set_ylim(*y_lim)
-        _style_axes(ax, export_config, x_minor_ticks=2)
-        ax.tick_params(axis="y", which="both", labelleft=True)
-        _add_panel_label(ax, "A", export_config)
-
-        cat_specs = [
-            (axes_flat[1], "DIL DIL prostate sextant (AP)", ap_order, "AP lesion location", "B"),
-            (axes_flat[2], "DIL SI short", si_order, "SI lesion location", "C"),
-            (axes_flat[3], "DIL double sextant zone", double_sextant_order, "Double sextant zone", "D"),
-        ]
-        for ax, category_col, category_order, title, panel_label in cat_specs:
-            sub = df[df[category_col].isin(category_order)].copy()
-            boxplot_data = []
-            positions = np.arange(len(category_order), dtype=float)
-            for idx, category in enumerate(category_order):
-                cat_df = sub[sub[category_col] == category].copy()
-                values = cat_df[y_col].to_numpy(dtype=float)
-                boxplot_data.append(values)
-                xs = _spread_positions(len(values), positions[idx], half_width=0.12)
-                ax.scatter(
-                    xs,
-                    values,
-                    s=58,
-                    color=optimizer_color,
-                    edgecolor="white",
-                    linewidth=0.8,
-                    alpha=0.95,
-                    zorder=3,
-                )
-
-            bp = ax.boxplot(
-                boxplot_data,
-                positions=positions,
-                widths=0.50,
-                patch_artist=True,
-                showfliers=False,
-                medianprops={"color": "black", "linewidth": 1.4},
-                whiskerprops={"color": "#4a4a4a", "linewidth": 1.0},
-                capprops={"color": "#4a4a4a", "linewidth": 1.0},
-            )
-            for patch in bp["boxes"]:
-                patch.set_facecolor(optimizer_color)
-                patch.set_alpha(0.15)
-                patch.set_edgecolor(optimizer_color)
-                patch.set_linewidth(1.2)
-
-            ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
-            ax.set_title(title, pad=18)
-            ax.set_xticks(positions, _category_tick_labels(sub, category_col, category_order))
-            if ax in {axes_flat[2]}:
-                ax.set_ylabel(r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$")
-            ax.set_ylim(*y_lim)
-            _style_axes(ax, export_config)
-            ax.tick_params(axis="y", which="both", labelleft=True)
-            _add_panel_label(ax, panel_label, export_config)
-
-        fig.subplots_adjust(top=0.92, bottom=0.13, hspace=0.38, wspace=0.22)
-        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+    y_label = r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$"
+    return _plot_difficulty_mixed_summary(
+        df,
+        save_dir,
+        y_col=y_col,
+        y_label=y_label,
+        color=CONTRAST_COLOR_MAP["optimal_minus_centroid"],
+        y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.14, high_floor=0.10),
+        export_config=export_config,
+        file_stem=file_stem,
+    )
 
 
 def plot_targeting_difficulty_summary(
@@ -1379,132 +1763,111 @@ def plot_targeting_difficulty_summary(
         return []
 
     df = family_difficulty_df.copy()
-    outcome_specs = [
-        (
-            "delta_centroid_minus_real_mean__DIL Global Mean BE",
-            CONTRAST_COLOR_MAP["centroid_minus_real"],
-            r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
-        ),
-        (
-            "delta_optimal_minus_real_mean__DIL Global Mean BE",
-            CONTRAST_COLOR_MAP["optimal_minus_real"],
-            r"Targeting difficulty $\Delta^{(O-R)}\langle \mathcal{P}_{D} \rangle$",
-        ),
-    ]
-    double_sextant_order = ["LP", "LA", "RP", "RA"]
-    y_vals = np.concatenate(
-        [
-            df[outcome_col].dropna().to_numpy(dtype=float)
-            for outcome_col, _, _ in outcome_specs
-            if outcome_col in df.columns
-        ]
-    )
-    y_min = float(np.nanmin(y_vals))
-    y_max = float(np.nanmax(y_vals))
-    y_span = max(y_max - y_min, 0.08)
-    y_lim = (
-        min(-0.02, y_min - 0.10 * y_span),
-        max(0.72, y_max + 0.12 * y_span),
+    y_col = "delta_centroid_minus_real_mean__DIL Global Mean BE"
+    y_label = r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$"
+    return _plot_difficulty_mixed_summary(
+        df,
+        save_dir,
+        y_col=y_col,
+        y_label=y_label,
+        color=CONTRAST_COLOR_MAP["centroid_minus_real"],
+        y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.04, high_floor=0.74),
+        export_config=export_config,
+        file_stem=file_stem,
     )
 
-    with _font_rc(export_config):
-        fig, axes = plt.subplots(2, 2, figsize=(13.8, 9.0), dpi=export_config.dpi, sharey=True)
-        panel_specs = [
-            (axes[0, 0], "A", outcome_specs[0], "scatter"),
-            (axes[0, 1], "B", outcome_specs[0], "category"),
-            (axes[1, 0], "C", outcome_specs[1], "scatter"),
-            (axes[1, 1], "D", outcome_specs[1], "category"),
-        ]
 
-        for ax, panel_label, (outcome_col, color, y_label), panel_kind in panel_specs:
-            if panel_kind == "scatter":
-                sub = df.dropna(subset=["DIL Maximum 3D diameter", outcome_col]).copy()
-                x = sub["DIL Maximum 3D diameter"].to_numpy(dtype=float)
-                y = sub[outcome_col].to_numpy(dtype=float)
-                ax.scatter(
-                    x,
-                    y,
-                    s=62,
-                    color=color,
-                    edgecolor="white",
-                    linewidth=0.8,
-                    alpha=0.95,
-                    zorder=3,
-                )
-                if len(x) >= 2:
-                    x_grid = np.linspace(np.nanmin(x), np.nanmax(x), 200)
-                    slope, intercept = np.polyfit(x, y, deg=1)
-                    ax.plot(
-                        x_grid,
-                        intercept + slope * x_grid,
-                        color=color,
-                        linewidth=1.8,
-                        linestyle=(0, (5, 3)),
-                        zorder=2,
-                    )
-                    rho_s = pd.Series(x).corr(pd.Series(y), method="spearman")
-                    ax.text(
-                        0.03,
-                        0.95,
-                        rf"$\rho_s = {rho_s:+.2f}$",
-                        transform=ax.transAxes,
-                        ha="left",
-                        va="top",
-                        fontsize=export_config.annotation_fontsize,
-                        bbox=ANNOT_BBOX,
-                    )
-                ax.set_title("Maximum DIL diameter", pad=18)
-                ax.set_xlabel("DIL maximum 3D diameter (mm)")
-                ax.set_ylabel(y_label)
-                ax.set_ylim(*y_lim)
-                ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
-                _style_axes(ax, export_config, x_minor_ticks=2)
-                ax.tick_params(axis="y", which="both", labelleft=True)
-                _add_panel_label(ax, panel_label, export_config)
-                continue
+def plot_optimizer_difficulty_continuous(
+    optimizer_difficulty_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_09_optimizer_difficulty_continuous",
+) -> list[Path]:
+    if optimizer_difficulty_df.empty:
+        return []
 
-            sub = df[df["DIL double sextant zone"].isin(double_sextant_order)].copy()
-            positions = np.arange(len(double_sextant_order), dtype=float)
-            boxplot_data = []
-            for idx, category in enumerate(double_sextant_order):
-                cat_df = sub[sub["DIL double sextant zone"] == category].copy()
-                values = cat_df[outcome_col].to_numpy(dtype=float)
-                boxplot_data.append(values)
-                xs = _spread_positions(len(values), positions[idx], half_width=0.12)
-                ax.scatter(
-                    xs,
-                    values,
-                    s=58,
-                    color=color,
-                    edgecolor="white",
-                    linewidth=0.8,
-                    alpha=0.95,
-                    zorder=3,
-                )
+    df = optimizer_difficulty_df.copy()
+    y_col = "optimizer_gain_mean__DIL Global Mean BE"
+    return _plot_difficulty_continuous_grid(
+        df,
+        save_dir,
+        y_col=y_col,
+        y_label=r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$",
+        color=CONTRAST_COLOR_MAP["optimal_minus_centroid"],
+        y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.14, high_floor=0.10),
+        export_config=export_config,
+        file_stem=file_stem,
+    )
 
-            bp = ax.boxplot(
-                boxplot_data,
-                positions=positions,
-                widths=0.50,
-                patch_artist=True,
-                showfliers=False,
-                medianprops={"color": "black", "linewidth": 1.4},
-                whiskerprops={"color": "#4a4a4a", "linewidth": 1.0},
-                capprops={"color": "#4a4a4a", "linewidth": 1.0},
-            )
-            for patch in bp["boxes"]:
-                patch.set_facecolor(color)
-                patch.set_alpha(0.15)
-                patch.set_edgecolor(color)
-                patch.set_linewidth(1.2)
 
-            ax.set_title("Double sextant zone", pad=18)
-            ax.set_xticks(positions, _category_tick_labels(sub, "DIL double sextant zone", double_sextant_order))
-            ax.set_ylim(*y_lim)
-            ax.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
-            _style_axes(ax, export_config)
-            ax.tick_params(axis="y", which="both", labelleft=True)
-            _add_panel_label(ax, panel_label, export_config)
+def plot_targeting_difficulty_continuous(
+    family_difficulty_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_10_targeting_difficulty_continuous",
+) -> list[Path]:
+    if family_difficulty_df.empty:
+        return []
 
-        fig.subplots_adjust(top=0.92, bottom=0.13, hspace=0.38, wspace=0.22)
-        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+    df = family_difficulty_df.copy()
+    y_col = "delta_centroid_minus_real_mean__DIL Global Mean BE"
+    return _plot_difficulty_continuous_grid(
+        df,
+        save_dir,
+        y_col=y_col,
+        y_label=r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
+        color=CONTRAST_COLOR_MAP["centroid_minus_real"],
+        y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.04, high_floor=0.74),
+        export_config=export_config,
+        file_stem=file_stem,
+    )
+
+
+def plot_optimizer_difficulty_categorical(
+    optimizer_difficulty_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_11_optimizer_difficulty_categorical",
+) -> list[Path]:
+    if optimizer_difficulty_df.empty:
+        return []
+
+    df = optimizer_difficulty_df.copy()
+    y_col = "optimizer_gain_mean__DIL Global Mean BE"
+    return _plot_difficulty_categorical_grid(
+        df,
+        save_dir,
+        y_col=y_col,
+        y_label=r"Optimizer increment $\Delta^{(O-C)}\langle \mathcal{P}_{D} \rangle$",
+        color=CONTRAST_COLOR_MAP["optimal_minus_centroid"],
+        y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.14, high_floor=0.10),
+        export_config=export_config,
+        file_stem=file_stem,
+    )
+
+
+def plot_targeting_difficulty_categorical(
+    family_difficulty_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_12_targeting_difficulty_categorical",
+) -> list[Path]:
+    if family_difficulty_df.empty:
+        return []
+
+    df = family_difficulty_df.copy()
+    y_col = "delta_centroid_minus_real_mean__DIL Global Mean BE"
+    return _plot_difficulty_categorical_grid(
+        df,
+        save_dir,
+        y_col=y_col,
+        y_label=r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
+        color=CONTRAST_COLOR_MAP["centroid_minus_real"],
+        y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.04, high_floor=0.74),
+        export_config=export_config,
+        file_stem=file_stem,
+    )

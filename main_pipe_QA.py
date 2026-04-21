@@ -164,6 +164,26 @@ def main() -> None:
             qa_fig_dir,
             export_config=export_config,
         ),
+        "optimizer_difficulty_continuous": production_plots_QA.plot_optimizer_difficulty_continuous(
+            plot_data_outputs.qa_family_optimizer_difficulty,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
+        "targeting_difficulty_continuous": production_plots_QA.plot_targeting_difficulty_continuous(
+            plot_data_outputs.qa_family_optimizer_difficulty,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
+        "optimizer_difficulty_categorical": production_plots_QA.plot_optimizer_difficulty_categorical(
+            plot_data_outputs.qa_family_optimizer_difficulty,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
+        "targeting_difficulty_categorical": production_plots_QA.plot_targeting_difficulty_categorical(
+            plot_data_outputs.qa_family_optimizer_difficulty,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
     }
 
     inventory = _build_inventory(
