@@ -563,6 +563,234 @@ The first full QA pipeline should produce:
 - exemplar figure data packages
 - family audit outputs
 
+### Manuscript Deliverable Folder
+
+The repo should also expose a focused manuscript-deliverable CSV pack, separate from the rawer QA analysis outputs.
+
+Locked location:
+
+- [output_data_QA/csv/deliverables](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/csv/deliverables>)
+
+Locked purpose:
+
+- provide table-ready CSVs for manuscript drafting
+- provide parse-ready geometry CSVs for prose, supplementary tables, or rapid figure iteration
+- avoid forcing the paper-writing workflow to depend directly on every intermediate QA analysis table
+
+Current deliverable CSV set:
+
+- `table_01_cohort_overview.csv`
+- `table_02_primary_headroom_summary.csv`
+- `table_03_safety_distance_summary.csv`
+- `table_04_biopsy_case_catalog.csv`
+- `table_05_targeting_feature_ranking.csv`
+- `table_06_targeting_location_summary.csv`
+- `geometry_biopsy_level_table.csv`
+- `geometry_biopsy_level_summary.csv`
+- `geometry_voxelwise_table.csv`
+- `geometry_voxelwise_group_summary.csv`
+
+These should be treated as the paper-writing layer, while the files under [output_data_QA/csv/qa](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/csv/qa>) remain the full analysis layer.
+
+## Journal Recommendation
+
+Recommended primary target:
+
+- `Medical Physics`
+
+Rationale:
+
+- AAPM describes `Medical Physics` as its flagship journal and explicitly as the international journal of medical physics research and practice.
+- This QA paper is more clinically facing than the PMB tissue paper, but it is still a quantitative medical-physics manuscript rather than a pure clinical implementation note.
+- The current paper package includes probabilistic modeling, matched-reference comparisons, bootstrap inference, safety geometry, and localization-accuracy analysis, which together fit better as a research-and-practice paper than as a narrowly applied clinical workflow note.
+
+Recommended fallback target:
+
+- `JACMP`
+
+Rationale:
+
+- AAPM describes `JACMP` as publishing papers that help clinical medical physicists perform their responsibilities more effectively and efficiently for the increased benefit of the patient.
+- If the manuscript is simplified into a more direct clinical QA implementation paper, with less emphasis on methodological nuance and special-case optimization, `JACMP` becomes a very reasonable target.
+
+Not recommended as first choice for this manuscript:
+
+- `PMB`
+
+Rationale:
+
+- PMB’s official scope explicitly states that papers predominantly clinical or biological in approach are not suitable.
+- This paper builds on the PMB tissue paper, but the current manuscript emphasis is now cohort QA, targeting performance, headroom, and clinical geometry tradeoffs rather than a first-principles methods paper.
+
+Source links used for this recommendation:
+
+- [AAPM Publications](https://aapm.org/pubs/default.asp)
+- [PMB official scope](https://publishingsupport.iopscience.iop.org/journals/physics-in-medicine-biology/about-physics-medicine-biology/)
+
+## Abstract and Paper Shape
+
+If the primary target is `Medical Physics`, the draft in the new paper repo should stop inheriting the PMB structured abstract and switch to the AAPM-style abstract pattern used in the dosimetry QA and GPR papers:
+
+- `Background`
+- `Purpose`
+- `Methods`
+- `Results`
+- `Conclusions`
+
+The current draft at [tissue_class_paper-QA.tex](</home/matthew-muscat/Documents/UBC/Research/Research_papers_git/tissue_2-tissue_QA_paper/tissue_class_paper-QA.tex>) still carries PMB-style abstract and methods inheritance from paper 1, so this should be changed early rather than late.
+
+## Proposed Manuscript Structure
+
+Recommended section order for the QA paper:
+
+1. `Introduction`
+2. `Materials and Methods`
+3. `Results`
+4. `Discussion`
+5. `Conclusion`
+
+Recommended subsection structure:
+
+### Introduction
+
+- clinical motivation for targeted-biopsy QA in the HDR/TRUS/mpMRI setting
+- uncertainty-aware sampling context established by the PMB tissue framework
+- need for matched-family benchmarking against centroid and optimized references
+- explicit statement that this paper asks how well real cores sampled the intended DIL, how much headroom existed, and what geometry determined that headroom
+
+### Materials and Methods
+
+- clinical cohort and biopsy workflow
+- inheritance from the published tissue-classification framework
+- family definition and matching logic
+- published DIL descriptors and headroom quantities
+- safety and geometric context metrics
+- radiomics and lesion-location variables
+- patient-clustered bootstrap and explanatory analyses
+
+### Results
+
+- cohort and family reconstruction summary
+- headline DIL sampling comparison for real, centroid, and optimal families
+- headroom decomposition
+- selected biopsy profiles and disagreement cases
+- safety/geometric context
+- localization accuracy
+- difficulty/headroom associations with lesion geometry
+
+### Discussion
+
+- what the paper adds beyond the tissue paper
+- why most cohort-average headroom appears to be `real -> centroid`
+- why `optimal -> centroid` still matters in special cases
+- what the safety-distance results imply clinically
+- what the lesion-size/location trends imply for future guidance-map work
+- limitations and next extensions
+
+## Citation Backbone
+
+This manuscript should explicitly cite the full line of previous work, not only paper 1.
+
+Core self-citation backbone:
+
+- tissue framework paper:
+  [tissue_class_paper.tex](</home/matthew-muscat/Documents/UBC/Research/Research_papers_git/tissue_1-classification_paper-PMB/tissue_class_paper.tex>)
+- dose exemplar paper:
+  [dosimetry-exemplars-paper-1.tex](</home/matthew-muscat/Documents/UBC/Research/Research_papers_git/dose_1-two_exemplars_paper-PMB/dosimetry-exemplars-paper-1.tex>)
+- dose cohort QA paper:
+  [main_dosimetry_cohort_uncertainties_v7.tex](</home/matthew-muscat/Documents/UBC/Research/Research_papers_git/dose_2-probabilistic-QA-paper-JACMP/main_dosimetry_cohort_uncertainties_v7.tex>)
+- GPR paper:
+  [dosimetry-GPR-paper-3.tex](</home/matthew-muscat/Documents/UBC/Research/Research_papers_git/dose_3-GPR_paper-AAPM-Medical-Physics/dosimetry-GPR-paper-3.tex>)
+
+Recommended citation roles:
+
+- cite paper 1 for the underlying probabilistic tissue notation, `\(\mathcal{P}_i(z)\)`, `\(\langle \mathcal{P}_{D}\rangle\)`, and `\(\max(\mathcal{P}_{D})\)`
+- cite dose exemplar and dose QA papers for the broader scalar-field / uncertainty-propagation program and for polished cohort-style QA framing
+- cite the GPR paper when positioning special-case optimization, spatial correlation, and the broader programmatic arc of the work
+
+## Recommended Figure Package
+
+### Main-Text Figures
+
+Recommended main-text figure set:
+
+1. a new study-design / matched-family schematic figure
+2. [Fig_QA_01_headline_family_comparison.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_01_headline_family_comparison.pdf>)
+3. [Fig_QA_02_headline_headroom.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_02_headline_headroom.pdf>)
+4. [Fig_QA_05_selected_dil_profiles.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_05_selected_dil_profiles.pdf>)
+5. [Fig_QA_04_safety_distance_family_comparison.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_04_safety_distance_family_comparison.pdf>)
+6. [Fig_QA_13_localization_accuracy_centroids.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_13_localization_accuracy_centroids.pdf>)
+7. [Fig_QA_10_targeting_difficulty_continuous.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_10_targeting_difficulty_continuous.pdf>)
+
+Main-text note:
+
+- the study-design schematic is still missing and should be created before drafting the paper in earnest
+- if the figure count needs to be reduced, the safety-distance comparison or the localization figure can move to supplement
+
+### Supplementary Figures
+
+Recommended supplementary set:
+
+- [Fig_QA_03_centroid_vs_optimal_disagreement.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_03_centroid_vs_optimal_disagreement.pdf>)
+- [Fig_QA_06_selected_dil_profiles_step.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_06_selected_dil_profiles_step.pdf>)
+- [Fig_QA_07_optimizer_difficulty_summary.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_07_optimizer_difficulty_summary.pdf>)
+- [Fig_QA_08_targeting_difficulty_summary.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_08_targeting_difficulty_summary.pdf>)
+- [Fig_QA_09_optimizer_difficulty_continuous.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_09_optimizer_difficulty_continuous.pdf>)
+- [Fig_QA_11_optimizer_difficulty_categorical.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_11_optimizer_difficulty_categorical.pdf>)
+- [Fig_QA_12_targeting_difficulty_categorical.pdf](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/figures/qa/Fig_QA_12_targeting_difficulty_categorical.pdf>)
+
+## Recommended Table Package
+
+### Main-Text Tables
+
+Recommended main-text tables:
+
+1. `table_01_cohort_overview.csv`
+2. `table_02_primary_headroom_summary.csv`
+3. `table_03_safety_distance_summary.csv`
+
+### Supplementary Tables
+
+Recommended supplementary tables:
+
+1. `table_04_biopsy_case_catalog.csv`
+2. `table_05_targeting_feature_ranking.csv`
+3. `table_06_targeting_location_summary.csv`
+4. `geometry_biopsy_level_summary.csv`
+5. `geometry_voxelwise_group_summary.csv`
+
+## What Is Complete Versus Outstanding
+
+### Completed and Ready to Transfer
+
+- family matching and family audit
+- manuscript-grade primary/headroom summary tables
+- safety-distance summary tables
+- biopsy case catalog
+- targeting-feature and location summary tables
+- parse-ready geometry CSVs at biopsy level and voxelwise level
+- polished QA figure lane for the core manuscript analyses
+
+### Still Outstanding Before Serious Drafting
+
+- a clean study-design / matched-family schematic figure
+- a final decision on which figures stay main text versus supplement
+- actual transfer of the chosen figure files into the paper repo `Images/` structure
+- rewriting of the inherited introduction and methods in the new paper repo
+- optional later extension: superior-wall / bladder-margin export from `biopsylocalization-python`
+
+## Transfer Guidance To Paper Repo
+
+When drafting into [tissue_class_paper-QA.tex](</home/matthew-muscat/Documents/UBC/Research/Research_papers_git/tissue_2-tissue_QA_paper/tissue_class_paper-QA.tex>), the first transfer pass should be:
+
+1. switch the abstract skeleton to the target-journal style
+2. replace the inherited introduction with the QA-specific storyline above
+3. replace the inherited methods section with the matched-family cohort methods
+4. copy only the main-text figure set into the paper repo image folder
+5. use the deliverables CSV folder as the source for manuscript tables and numeric reporting
+
+The key rule is: draft from the deliverable layer, not directly from every raw QA analysis CSV.
+
 ## Open Decisions
 
 These decisions are intentionally deferred but must remain narrow:

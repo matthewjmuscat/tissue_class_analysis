@@ -14,6 +14,7 @@ from scipy import stats
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, Patch
 from matplotlib.ticker import AutoMinorLocator
+from scipy.stats import chi2
 
 from qa.config import QAFigureExportConfig
 from qa.notation import (
@@ -100,7 +101,7 @@ ALL_12_ZONE_ORDER = [
 
 @contextmanager
 def _font_rc(export_config: QAFigureExportConfig):
-    with mpl.rc_context(
+    theme_rc = (
         MPL_FONT_RC
         | MPL_FACE_RC
         | {
@@ -110,8 +111,9 @@ def _font_rc(export_config: QAFigureExportConfig):
             "legend.fontsize": export_config.legend_fontsize,
             "axes.titlesize": export_config.title_fontsize,
         }
-    ):
-        sns.set_theme(style="white", rc=MPL_FONT_RC | MPL_FACE_RC)
+    )
+    with mpl.rc_context(theme_rc):
+        sns.set_theme(style="white", rc=theme_rc)
         yield
 
 
@@ -235,6 +237,8 @@ def _style_axes(
     ax.yaxis.set_minor_locator(AutoMinorLocator(y_minor_ticks))
     if x_minor_ticks is not None:
         ax.xaxis.set_minor_locator(AutoMinorLocator(x_minor_ticks))
+    ax.xaxis.label.set_size(export_config.axes_label_fontsize)
+    ax.yaxis.label.set_size(export_config.axes_label_fontsize)
     ax.tick_params(
         axis="both",
         which="major",
@@ -245,6 +249,7 @@ def _style_axes(
         left=True,
         top=False,
         right=False,
+        labelsize=export_config.tick_label_fontsize,
     )
     ax.tick_params(
         axis="both",
@@ -399,22 +404,44 @@ def _choose_annotation_offset(
     *,
     all_points: np.ndarray,
     used_label_positions: list[np.ndarray],
+    candidate_offsets: Sequence[tuple[int, int]] | None = None,
     forbidden_axes_regions: Sequence[tuple[tuple[float, float], tuple[float, float]]] | None = None,
+    mean_xy: np.ndarray | None = None,
+    inv_cov: np.ndarray | None = None,
+    ellipse_scale: float | None = None,
 ) -> tuple[int, int]:
-    candidate_offsets = [
-        (16, 16),
-        (16, -16),
-        (-16, 16),
-        (-16, -16),
-        (24, 0),
-        (-24, 0),
-        (0, 24),
-        (0, -24),
-        (30, 12),
-        (-30, 12),
-        (30, -12),
-        (-30, -12),
-    ]
+    if candidate_offsets is None:
+        if mean_xy is not None:
+            sx = 1 if x >= float(mean_xy[0]) else -1
+            sy = 1 if y >= float(mean_xy[1]) else -1
+            candidate_offsets = [
+                (22 * sx, 18 * sy),
+                (30 * sx, 22 * sy),
+                (18 * sx, 30 * sy),
+                (38 * sx, 24 * sy),
+                (24 * sx, 38 * sy),
+                (30 * sx, 10 * sy),
+                (10 * sx, 30 * sy),
+                (16 * sx, -18 * sy),
+                (-18 * sx, 16 * sy),
+                (42 * sx, 12 * sy),
+                (12 * sx, 42 * sy),
+            ]
+        else:
+            candidate_offsets = [
+                (16, 16),
+                (16, -16),
+                (-16, 16),
+                (-16, -16),
+                (24, 0),
+                (-24, 0),
+                (0, 24),
+                (0, -24),
+                (30, 12),
+                (-30, 12),
+                (30, -12),
+                (-30, -12),
+            ]
     anchor_disp = ax.transData.transform((x, y))
     point_disp = ax.transData.transform(all_points)
 
@@ -433,7 +460,21 @@ def _choose_annotation_offset(
             for (x0, x1), (y0, y1) in forbidden_axes_regions:
                 if x0 <= label_axes[0] <= x1 and y0 <= label_axes[1] <= y1:
                     penalty += 500.0
-        score = min_point_dist + 0.7 * min_used_dist + direction_bonus - penalty
+        ellipse_bonus = 0.0
+        if mean_xy is not None and inv_cov is not None and ellipse_scale is not None:
+            cand_data = ax.transData.inverted().transform(label_pos)
+            diff = np.asarray(cand_data, dtype=float) - np.asarray(mean_xy, dtype=float)
+            mahal = float(np.sqrt(diff @ inv_cov @ diff))
+            if mahal >= ellipse_scale + 0.2:
+                ellipse_bonus = 80.0
+            elif mahal >= ellipse_scale:
+                ellipse_bonus = 35.0
+            else:
+                penalty += 180.0
+        x_axes, y_axes = ax.transAxes.inverted().transform(label_pos)
+        if not (0.04 <= x_axes <= 0.96 and 0.06 <= y_axes <= 0.94):
+            penalty += 400.0
+        score = min_point_dist + 0.7 * min_used_dist + direction_bonus + ellipse_bonus - penalty
         if score > best_score:
             best_score = score
             best_offset = (dx, dy)
@@ -477,6 +518,73 @@ def _draw_covariance_ellipse(
         zorder=2,
     )
     ax.add_patch(ellipse)
+
+
+def _choose_open_axes_label_position(
+    ax,
+    *,
+    x: float,
+    y: float,
+    mean_xy: np.ndarray,
+    inv_cov: np.ndarray,
+    ellipse_scale: float,
+    all_points: np.ndarray,
+    used_display_positions: list[np.ndarray],
+) -> tuple[float, float]:
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    x_span = float(xlim[1] - xlim[0])
+    y_span = float(ylim[1] - ylim[0])
+    x_candidates = np.linspace(xlim[0] + 0.10 * x_span, xlim[1] - 0.10 * x_span, 9)
+    y_candidates = np.linspace(ylim[0] + 0.10 * y_span, ylim[1] - 0.10 * y_span, 9)
+    point_disp = ax.transData.transform(all_points)
+    anchor_disp = ax.transData.transform((x, y))
+    center_disp = ax.transData.transform((mean_xy[0], mean_xy[1]))
+    outward_vec = anchor_disp - center_disp
+    outward_norm = float(np.linalg.norm(outward_vec))
+    if outward_norm > 1e-6:
+        outward_unit = outward_vec / outward_norm
+    else:
+        outward_unit = np.array([0.0, 1.0], dtype=float)
+    best_data_pos = (x, y)
+    best_score = float("-inf")
+
+    for cand_x in x_candidates:
+        for cand_y in y_candidates:
+            cand_data = np.array([float(cand_x), float(cand_y)], dtype=float)
+            cand_disp = ax.transData.transform(cand_data)
+            diff = cand_data - mean_xy
+            mahal = float(np.sqrt(diff @ inv_cov @ diff))
+            if mahal < ellipse_scale:
+                outside_bonus = -400.0
+            elif mahal < ellipse_scale + 0.35:
+                outside_bonus = 40.0
+            else:
+                outside_bonus = 120.0
+            min_point_dist = float(np.min(np.linalg.norm(point_disp - cand_disp, axis=1)))
+            used_dists = [float(np.linalg.norm(prev - cand_disp)) for prev in used_display_positions]
+            min_used_dist = min(used_dists) if used_dists else 1000.0
+            anchor_dist = float(np.linalg.norm(cand_disp - anchor_disp))
+            center_dist = float(np.linalg.norm(cand_disp - center_disp))
+            cand_from_center = cand_disp - center_disp
+            cand_from_center_norm = float(np.linalg.norm(cand_from_center))
+            if cand_from_center_norm > 1e-6:
+                cand_center_unit = cand_from_center / cand_from_center_norm
+                directional_bonus = 35.0 * max(0.0, float(np.dot(outward_unit, cand_center_unit)))
+            else:
+                directional_bonus = 0.0
+            score = (
+                outside_bonus
+                + 1.0 * min_point_dist
+                + 0.70 * min_used_dist
+                + 0.10 * center_dist
+                - 0.08 * anchor_dist
+                + directional_bonus
+            )
+            if score > best_score:
+                best_score = score
+                best_data_pos = (float(cand_x), float(cand_y))
+    return best_data_pos
 
 
 def _draw_feature_regression_panel(
@@ -2010,17 +2118,15 @@ def _localization_summary_text(
         [
             rf"$\mu_{{{x_symbol}}} = {np.mean(x):+.2f}$ mm, $\sigma_{{{x_symbol}}} = {np.std(x, ddof=1):.2f}$ mm",
             rf"$\mu_{{{y_symbol}}} = {np.mean(y):+.2f}$ mm, $\sigma_{{{y_symbol}}} = {np.std(y, ddof=1):.2f}$ mm",
-            rf"$n = {len(x)}$ real cores",
-            "Dashed ellipse: 95% covariance contour",
         ]
     )
 
 
 def _plot_localization_panel(
     fig: mpl.figure.Figure,
-    spec,
-    df: pd.DataFrame,
     *,
+    main_rect: tuple[float, float, float, float],
+    df: pd.DataFrame,
     x_col: str,
     y_col: str,
     x_label: str,
@@ -2028,22 +2134,17 @@ def _plot_localization_panel(
     x_symbol: str,
     y_symbol: str,
     plane_label: str,
-    panel_label: str,
     export_config: QAFigureExportConfig,
     norm,
     cmap,
-) -> tuple[object, str | None, object]:
-    gs = spec.subgridspec(
-        2,
-        2,
-        height_ratios=[0.24, 1.0],
-        width_ratios=[1.0, 0.24],
-        hspace=0.05,
-        wspace=0.05,
-    )
-    ax_top = fig.add_subplot(gs[0, 0])
-    ax_main = fig.add_subplot(gs[1, 0], sharex=ax_top)
-    ax_right = fig.add_subplot(gs[1, 1], sharey=ax_main)
+) -> tuple[object, object, str | None, object]:
+    main_x0, main_y0, main_w, main_h = main_rect
+    hist_gap = 0.006
+    hist_h = 0.042
+    hist_w = 0.082
+    ax_main = fig.add_axes([main_x0, main_y0, main_w, main_h])
+    ax_top = fig.add_axes([main_x0, main_y0 + main_h + hist_gap, main_w, hist_h], sharex=ax_main)
+    ax_right = fig.add_axes([main_x0 + main_w + hist_gap, main_y0, hist_w, main_h], sharey=ax_main)
 
     x = df[x_col].to_numpy(dtype=float)
     y = df[y_col].to_numpy(dtype=float)
@@ -2073,17 +2174,6 @@ def _plot_localization_panel(
     ax_main.set_xlabel(x_label)
     ax_main.set_ylabel(y_label)
     _style_axes(ax_main, export_config, x_minor_ticks=2)
-    _add_panel_label(ax_main, panel_label, export_config)
-    ax_main.text(
-        0.03,
-        0.97,
-        plane_label,
-        transform=ax_main.transAxes,
-        ha="left",
-        va="top",
-        fontsize=export_config.title_fontsize - 1,
-        style="italic",
-    )
 
     bins = np.linspace(-max_abs, max_abs, 15)
     ax_top.hist(x, bins=bins, color="#d4d4d4", edgecolor="white", linewidth=0.7)
@@ -2101,28 +2191,38 @@ def _plot_localization_panel(
         ax_right.spines[side].set_visible(False)
     ax_top.grid(visible=False)
     ax_right.grid(visible=False)
-
     labeled = df[df["Selected biopsy heading"].notna()].copy()
     if not labeled.empty:
         all_points = df[[x_col, y_col]].to_numpy(dtype=float)
         used_label_positions: list[np.ndarray] = []
+        mean_xy = np.array([float(np.mean(x)), float(np.mean(y))], dtype=float)
+        cov = np.cov(x, y)
+        if np.linalg.det(cov) <= 0:
+            cov = cov + 1e-6 * np.eye(2)
+        inv_cov = np.linalg.inv(cov)
+        ellipse_scale = float(np.sqrt(chi2.ppf(0.95, 2)))
+        forbidden_regions = [((0.58, 0.98), (0.00, 0.22))]
         for _, row in labeled.iterrows():
+            short_label = str(row["Selected biopsy heading"]).replace("Biopsy ", "")
             dx, dy = _choose_annotation_offset(
                 ax_main,
                 float(row[x_col]),
                 float(row[y_col]),
                 all_points=all_points,
                 used_label_positions=used_label_positions,
+                forbidden_axes_regions=forbidden_regions,
+                mean_xy=mean_xy,
+                inv_cov=inv_cov,
+                ellipse_scale=ellipse_scale,
             )
             txt = ax_main.annotate(
-                str(row["Selected biopsy heading"]),
+                short_label,
                 xy=(float(row[x_col]), float(row[y_col])),
                 xytext=(dx, dy),
                 textcoords="offset points",
                 ha="left" if dx >= 0 else "right",
                 va="bottom" if dy >= 0 else "top",
                 fontsize=export_config.annotation_fontsize,
-                bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=0.2),
                 arrowprops=dict(
                     arrowstyle="-",
                     color="#4a4a4a",
@@ -2134,11 +2234,101 @@ def _plot_localization_panel(
             )
             txt.set_path_effects([pe.withStroke(linewidth=2.0, foreground="white")])
             used_label_positions.append(
-                ax_main.transData.transform((float(row[x_col]), float(row[y_col])))
-                + np.array([dx, dy], dtype=float)
+                ax_main.transData.transform((float(row[x_col]), float(row[y_col]))) + np.array([dx, dy], dtype=float)
             )
 
-    return ax_main, _localization_summary_text(x, y, x_symbol=x_symbol, y_symbol=y_symbol), scatter
+    return ax_main, ax_top, _localization_summary_text(x, y, x_symbol=x_symbol, y_symbol=y_symbol), scatter
+
+
+def _plot_single_localization_accuracy_figure(
+    df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    panel_label: str,
+    plane_label: str,
+    x_col: str,
+    y_col: str,
+    x_label: str,
+    y_label: str,
+    x_symbol: str,
+    y_symbol: str,
+    export_config: QAFigureExportConfig,
+    file_stem: str,
+) -> list[Path]:
+    cmap = mpl.cm.get_cmap("cividis")
+    norm = mpl.colors.Normalize(vmin=0.0, vmax=1.0)
+
+    with _font_rc(export_config):
+        fig = plt.figure(figsize=(8.8, 9.2), dpi=export_config.dpi)
+        ax, hist_ax, summary_text, scatter = _plot_localization_panel(
+            fig,
+            main_rect=(0.14, 0.19, 0.60, 0.56),
+            df=df,
+            x_col=x_col,
+            y_col=y_col,
+            x_label=x_label,
+            y_label=y_label,
+            x_symbol=x_symbol,
+            y_symbol=y_symbol,
+            plane_label=plane_label,
+            export_config=export_config,
+            norm=norm,
+            cmap=cmap,
+        )
+        fig.canvas.draw()
+        hist_pos = hist_ax.get_position()
+        fig.text(
+            hist_pos.x0 + 0.5 * hist_pos.width,
+            hist_pos.y1 + 0.010,
+            f"{panel_label}) {plane_label}",
+            ha="center",
+            va="bottom",
+            fontsize=export_config.title_fontsize,
+        )
+
+        legend_handles = [
+            mpl.lines.Line2D(
+                [0],
+                [0],
+                marker="o",
+                linestyle="none",
+                markerfacecolor="#777777",
+                markeredgecolor="white",
+                markeredgewidth=0.8,
+                markersize=7,
+                label=rf"Real-core centroid ($n = {len(df)}$)",
+            ),
+            mpl.lines.Line2D(
+                [0, 1],
+                [0, 0],
+                color=HIGHLIGHT_COLOR,
+                linewidth=1.7,
+                linestyle=(0, (5, 3)),
+                label="Dashed ellipse: 95% covariance contour",
+            ),
+        ]
+        legend = fig.legend(
+            handles=legend_handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.975),
+            ncol=2,
+            frameon=True,
+            fancybox=False,
+            framealpha=1.0,
+            edgecolor="#4a4a4a",
+            fontsize=export_config.legend_fontsize,
+            handlelength=2.2,
+            columnspacing=1.6,
+        )
+        legend.get_frame().set_linewidth(0.9)
+
+        cax = fig.add_axes([0.19, 0.075, 0.58, 0.022])
+        cbar = fig.colorbar(scatter, cax=cax, orientation="horizontal")
+        cbar.set_label(r"$\langle \mathcal{P}_{D} \rangle$", fontsize=export_config.axes_label_fontsize)
+        cbar.ax.tick_params(labelsize=export_config.tick_label_fontsize)
+
+        _add_inside_panel_box(ax, summary_text, export_config, x=0.97, y=0.03)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)
 
 
 def plot_localization_accuracy_centroids(
@@ -2163,51 +2353,37 @@ def plot_localization_accuracy_centroids(
     if df.empty:
         return []
 
-    cmap = mpl.cm.get_cmap("cividis")
-    norm = mpl.colors.Normalize(vmin=0.0, vmax=1.0)
-
-    with _font_rc(export_config):
-        fig = plt.figure(figsize=(15.6, 7.8), dpi=export_config.dpi)
-        outer = fig.add_gridspec(1, 2, wspace=0.24)
-
-        left_ax, left_text, scatter = _plot_localization_panel(
-            fig,
-            outer[0, 0],
+    output_paths: list[Path] = []
+    output_paths.extend(
+        _plot_single_localization_accuracy_figure(
             df,
+            save_dir,
+            panel_label="a",
+            plane_label="Transverse plane",
             x_col="Bx (X, DIL centroid frame)",
             y_col="Bx (Y, DIL centroid frame)",
             x_label="L/R offset from DIL centroid (mm)\nL(+), R(-)",
             y_label="A/P offset from DIL centroid (mm)\nP(+), A(-)",
             x_symbol="x",
             y_symbol="y",
-            plane_label="Transverse plane",
-            panel_label="A",
             export_config=export_config,
-            norm=norm,
-            cmap=cmap,
+            file_stem=file_stem,
         )
-        right_ax, right_text, _ = _plot_localization_panel(
-            fig,
-            outer[0, 1],
+    )
+    output_paths.extend(
+        _plot_single_localization_accuracy_figure(
             df,
+            save_dir,
+            panel_label="b",
+            plane_label="Sagittal plane",
             x_col="Bx (Z, DIL centroid frame)",
             y_col="Bx (Y, DIL centroid frame)",
             x_label="S/I offset from DIL centroid (mm)\nS(+), I(-)",
             y_label="A/P offset from DIL centroid (mm)\nP(+), A(-)",
             x_symbol="z",
             y_symbol="y",
-            plane_label="Sagittal plane",
-            panel_label="B",
             export_config=export_config,
-            norm=norm,
-            cmap=cmap,
+            file_stem="Fig_QA_14_localization_accuracy_sagittal",
         )
-
-        fig.subplots_adjust(top=0.88, bottom=0.11, right=0.90)
-        cax = fig.add_axes([0.915, 0.17, 0.018, 0.66])
-        cbar = fig.colorbar(scatter, cax=cax)
-        cbar.set_label(r"$\langle \mathcal{P}_{D} \rangle$")
-
-        _add_inside_panel_box(left_ax, left_text, export_config, x=0.97, y=0.03)
-        _add_inside_panel_box(right_ax, right_text, export_config, x=0.97, y=0.03)
-        return _save_figure_multi(fig, save_dir, file_stem, export_config)
+    )
+    return output_paths

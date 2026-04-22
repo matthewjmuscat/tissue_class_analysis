@@ -6,6 +6,7 @@ import pandas as pd
 
 import production_plots_QA
 from qa.config import QAFigureExportConfig, QAStudyConfig
+from qa.deliverables import build_qa_deliverable_outputs
 from qa.families import build_qa_family_outputs
 from qa.load import load_qa_source_tables
 from qa.plot_data import build_qa_plot_data_outputs
@@ -65,8 +66,15 @@ def main() -> None:
     family_outputs = build_qa_family_outputs(source_tables)
     stats_outputs = build_qa_stats_outputs(family_outputs, config)
     plot_data_outputs = build_qa_plot_data_outputs(source_tables, family_outputs, stats_outputs)
+    deliverable_outputs = build_qa_deliverable_outputs(
+        source_tables,
+        family_outputs,
+        stats_outputs,
+        plot_data_outputs,
+    )
 
     qa_csv_dir = dirs["csv"] / "qa"
+    deliverables_csv_dir = dirs["csv"] / "deliverables"
     qa_fig_dir = dirs["figures"] / "qa"
     manifests_dir = dirs["manifests"]
 
@@ -120,6 +128,46 @@ def main() -> None:
     _write_csv(
         qa_csv_dir / "qa_targeting_difficulty_group_summary.csv",
         plot_data_outputs.qa_targeting_difficulty_group_summary,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_01_cohort_overview.csv",
+        deliverable_outputs.cohort_overview_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_02_primary_headroom_summary.csv",
+        deliverable_outputs.primary_headroom_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_03_safety_distance_summary.csv",
+        deliverable_outputs.safety_distance_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_04_biopsy_case_catalog.csv",
+        deliverable_outputs.biopsy_case_catalog_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_05_targeting_feature_ranking.csv",
+        deliverable_outputs.targeting_feature_ranking_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_06_targeting_location_summary.csv",
+        deliverable_outputs.targeting_location_summary_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "geometry_biopsy_level_table.csv",
+        deliverable_outputs.geometric_biopsy_level_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "geometry_biopsy_level_summary.csv",
+        deliverable_outputs.geometric_biopsy_level_summary_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "geometry_voxelwise_table.csv",
+        deliverable_outputs.geometric_voxelwise_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "geometry_voxelwise_group_summary.csv",
+        deliverable_outputs.geometric_voxelwise_group_summary_table,
     )
 
     figure_paths = {
@@ -221,6 +269,21 @@ def main() -> None:
         }
     )
     _write_csv(manifests_dir / "qa_table_inventory.csv", inventory)
+    deliverable_inventory = _build_inventory(
+        {
+            "table_01_cohort_overview": deliverable_outputs.cohort_overview_table,
+            "table_02_primary_headroom_summary": deliverable_outputs.primary_headroom_table,
+            "table_03_safety_distance_summary": deliverable_outputs.safety_distance_table,
+            "table_04_biopsy_case_catalog": deliverable_outputs.biopsy_case_catalog_table,
+            "table_05_targeting_feature_ranking": deliverable_outputs.targeting_feature_ranking_table,
+            "table_06_targeting_location_summary": deliverable_outputs.targeting_location_summary_table,
+            "geometry_biopsy_level_table": deliverable_outputs.geometric_biopsy_level_table,
+            "geometry_biopsy_level_summary": deliverable_outputs.geometric_biopsy_level_summary_table,
+            "geometry_voxelwise_table": deliverable_outputs.geometric_voxelwise_table,
+            "geometry_voxelwise_group_summary": deliverable_outputs.geometric_voxelwise_group_summary_table,
+        }
+    )
+    _write_csv(manifests_dir / "qa_deliverable_inventory.csv", deliverable_inventory)
     _write_csv(manifests_dir / "qa_figure_manifest.csv", _build_figure_manifest(figure_paths))
 
     complete_families = int(family_outputs.qa_family_audit["Family_complete"].sum())
