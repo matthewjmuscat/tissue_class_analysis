@@ -34,6 +34,8 @@ class QADeliverableOutputs:
     cohort_overview_table: pd.DataFrame
     primary_headroom_table: pd.DataFrame
     safety_distance_table: pd.DataFrame
+    group_mean_bootstrap_table: pd.DataFrame
+    inference_method_comparison_table: pd.DataFrame
     targeting_feature_ranking_table: pd.DataFrame
     targeting_location_summary_table: pd.DataFrame
     biopsy_case_catalog_table: pd.DataFrame
@@ -166,6 +168,151 @@ def build_safety_distance_table(stats_outputs: QAStatsOutputs) -> pd.DataFrame:
         "significance_label",
     ]
     return out.sort_values(["outcome_order", "contrast_order"])[keep_cols].reset_index(drop=True)
+
+
+def build_group_mean_bootstrap_table(stats_outputs: QAStatsOutputs) -> pd.DataFrame:
+    summary = stats_outputs.group_bootstrap_summary_df.copy()
+    if summary.empty:
+        return pd.DataFrame(
+            columns=[
+                "outcome_name",
+                "outcome_symbol",
+                "group_name",
+                "n_observations",
+                "n_patients",
+                "n_families",
+                "group_mean",
+                "ci_lower_95",
+                "ci_upper_95",
+                "bootstrap_confidence_level",
+                "bootstrap_iterations",
+            ]
+        )
+    metric_order_map = {
+        metric: idx
+        for idx, metric in enumerate(PRIMARY_METRIC_ORDER + SAFETY_METRIC_ORDER)
+    }
+    group_order_map = {group: idx for idx, group in enumerate(["Real", "Centroid", "Optimal"])}
+    out = summary.rename(
+        columns={
+            "metric": "outcome_name",
+            "n_rows": "n_observations",
+            "n_clusters": "n_patients",
+            "observed_mean": "group_mean",
+            "bootstrap_ci_lower": "ci_lower_95",
+            "bootstrap_ci_upper": "ci_upper_95",
+        }
+    )
+    out["outcome_symbol"] = out["outcome_name"].map(metric_math).fillna(out["outcome_name"])
+    out["outcome_order"] = out["outcome_name"].map(metric_order_map)
+    out["group_order"] = out["group_name"].map(group_order_map)
+    keep_cols = [
+        "outcome_name",
+        "outcome_symbol",
+        "group_name",
+        "n_observations",
+        "n_patients",
+        "n_families",
+        "group_mean",
+        "ci_lower_95",
+        "ci_upper_95",
+        "bootstrap_confidence_level",
+        "bootstrap_iterations",
+    ]
+    return out.sort_values(["outcome_order", "group_order"])[keep_cols].reset_index(drop=True)
+
+
+def build_inference_method_comparison_table(stats_outputs: QAStatsOutputs) -> pd.DataFrame:
+    summary = stats_outputs.method_comparison_summary_df.copy()
+    if summary.empty:
+        return pd.DataFrame(
+            columns=[
+                "outcome_name",
+                "outcome_symbol",
+                "contrast_key",
+                "contrast_label",
+                "method_key",
+                "method_label",
+                "analysis_scale",
+                "real_aggregation",
+                "n_observations",
+                "n_patients",
+                "n_families",
+                "group_a_name",
+                "group_b_name",
+                "group_a_mean",
+                "group_b_mean",
+                "mean_delta",
+                "ci_lower_95",
+                "ci_upper_95",
+                "p_value",
+                "test_statistic",
+                "standardized_mean_delta",
+                "ci_excludes_zero",
+                "significance_label",
+                "notes",
+            ]
+        )
+    method_label_map = {
+        "patient_cluster_bootstrap": "Patient-clustered paired-delta bootstrap",
+        "family_mean_paired_t": "Family-mean paired t test",
+        "family_mean_wilcoxon": "Family-mean Wilcoxon signed-rank",
+        "mixedlm_patient_family": "Mixed-effects model",
+    }
+    metric_order_map = {
+        metric: idx
+        for idx, metric in enumerate(PRIMARY_METRIC_ORDER + SAFETY_METRIC_ORDER)
+    }
+    out = summary.rename(
+        columns={
+            "metric": "outcome_name",
+            "n_rows": "n_observations",
+            "n_clusters": "n_patients",
+            "observed_mean_delta": "mean_delta",
+        }
+    )
+    out["outcome_symbol"] = out["outcome_name"].map(metric_math).fillna(out["outcome_name"])
+    out["contrast_label"] = out["contrast_key"].map(CONTRAST_LABEL_MAP).fillna(out["contrast_key"])
+    out["method_label"] = out["method_key"].map(method_label_map).fillna(out["method_key"])
+    out["outcome_order"] = out["outcome_name"].map(metric_order_map)
+    out["contrast_order"] = out["contrast_key"].map({contrast: idx for idx, contrast in enumerate(CONTRAST_ORDER)})
+    out["method_order"] = out["method_key"].map(
+        {
+            "patient_cluster_bootstrap": 0,
+            "family_mean_paired_t": 1,
+            "family_mean_wilcoxon": 2,
+            "mixedlm_patient_family": 3,
+        }
+    )
+    keep_cols = [
+        "outcome_name",
+        "outcome_symbol",
+        "contrast_key",
+        "contrast_label",
+        "method_key",
+        "method_label",
+        "analysis_scale",
+        "real_aggregation",
+        "n_observations",
+        "n_patients",
+        "n_families",
+        "group_a_name",
+        "group_b_name",
+        "group_a_mean",
+        "group_b_mean",
+        "mean_delta",
+        "ci_lower_95",
+        "ci_upper_95",
+        "p_value",
+        "test_statistic",
+        "standardized_mean_delta",
+        "ci_excludes_zero",
+        "significance_label",
+        "notes",
+    ]
+    return out.sort_values(["outcome_order", "contrast_order", "method_order"])[keep_cols].reset_index(
+        drop=True
+    )
 
 
 def build_targeting_feature_ranking_table(plot_data_outputs: QAPlotDataOutputs) -> pd.DataFrame:
@@ -515,6 +662,8 @@ def build_qa_deliverable_outputs(
         cohort_overview_table=build_cohort_overview_table(family_outputs),
         primary_headroom_table=build_primary_headroom_table(stats_outputs),
         safety_distance_table=build_safety_distance_table(stats_outputs),
+        group_mean_bootstrap_table=build_group_mean_bootstrap_table(stats_outputs),
+        inference_method_comparison_table=build_inference_method_comparison_table(stats_outputs),
         targeting_feature_ranking_table=build_targeting_feature_ranking_table(plot_data_outputs),
         targeting_location_summary_table=build_targeting_location_summary_table(plot_data_outputs),
         biopsy_case_catalog_table=build_biopsy_case_catalog_table(family_outputs, plot_data_outputs),

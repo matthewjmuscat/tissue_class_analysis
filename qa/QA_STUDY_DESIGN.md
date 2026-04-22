@@ -365,9 +365,45 @@ Primary uncertainty quantification:
 
 Rationale:
 
-- preserves within-patient and within-family dependence structure
-- remains easy to explain
-- is robust for the present cohort size
+- the data are matched by design, but they are not simple one-to-one independent pairs
+- a lesion family can contribute `1` to `3` real cores against the same centroid and optimal reference cores
+- multiple lesion families can arise within the same base patient
+- the primary outcomes are bounded and not well approximated by a clean Gaussian paired-difference model in a cohort this size
+- resampling at the base-patient level preserves the dependence structure induced by repeated real attempts and within-patient clustering
+- the estimator remains easy to explain in manuscript language: mean paired delta with patient-clustered uncertainty
+
+Primary interval and significance implementation:
+
+- report percentile bootstrap `95%` confidence intervals for paired deltas
+- treat CI exclusion of zero as the primary evidence threshold
+- if exact p-values are shown, compute them from the same patient-clustered bootstrap distribution
+- do not describe these intervals as BCa unless BCa is explicitly implemented
+- do not describe the current standardized effect summary as Cohen's `d`; it is a standardized mean paired delta
+
+Why a simple matched test is not the primary method:
+
+- a paired `t` test assumes independent one-to-one pairs; that is not the structure for `real vs centroid` or `real vs optimal` here
+- a Wilcoxon signed-rank test is also a one-pair-per-unit method unless the data are first collapsed to one family-level value
+- using naive paired tests directly on all real cores would pseudo-replicate the same family reference core and understate uncertainty
+- the only contrast that is naturally one-to-one at the family level without further aggregation is `optimal - centroid`
+
+Accepted matched methods considered:
+
+- family-level paired `t` test
+- family-level Wilcoxon signed-rank test
+- linear mixed-effects modelling with patient and family structure
+
+Decision:
+
+- use the patient-clustered paired-delta bootstrap as the primary inferential method for the headline contrasts
+- use more classical matched methods only as sensitivity or confirmatory analyses after data are collapsed to the appropriate unit
+
+Why this is the best primary choice for paper 1:
+
+- it respects the actual design instead of forcing the data into a simpler but incorrect one-pair-per-observation structure
+- it allows the headline analysis to remain at the real-core level, which preserves the clinically meaningful fact that some lesions received multiple real attempts
+- it is robust to unequal family sizes and does not rely on strong parametric assumptions
+- it gives directly interpretable uncertainty for the exact estimand we care about: mean headroom at the cohort level under matched-family sampling
 
 Primary significance rule:
 
@@ -392,12 +428,65 @@ Recommended model structure for explanatory analyses:
 
 Explanatory models should remain small and pre-specified.
 
+Recommended confirmatory model for the main outcomes if a reviewer requests a classical approach:
+
+- linear mixed model on the long family table
+- fixed effect for family member type (`R`, `C`, `O`)
+- random intercept for `Base patient ID`
+- optional random intercept for lesion family nested within patient
+
+This model is a sensitivity analysis, not the locked primary analysis.
+
+### Locked Sensitivity Inference
+
+If an explicitly classical matched test is reported, it should be done only on data collapsed to the correct paired unit.
+
+Recommended sensitivity tests:
+
+- family-aggregated `real vs centroid` using one family-level real summary and paired Wilcoxon signed-rank test
+- family-aggregated `real vs optimal` using one family-level real summary and paired Wilcoxon signed-rank test
+- family-level `optimal vs centroid` using paired Wilcoxon signed-rank test
+
+Role of these tests:
+
+- reassure readers who expect a conventional matched nonparametric analysis
+- confirm direction and rough magnitude of the primary bootstrap findings
+- not replace the primary patient-clustered bootstrap, because the aggregation step changes the estimand
+
+Locked statistics deliverables:
+
+- export the primary patient-clustered bootstrap summaries
+- export patient-clustered bootstrap group-mean summaries for `Real`, `Centroid`, and `Optimal`
+- export family-aggregated paired `t` test summaries
+- export family-aggregated paired Wilcoxon signed-rank summaries
+- export mixed-effects contrast summaries
+- export one combined method-comparison CSV so the same contrasts can be compared side by side before final manuscript selection
+
+### Difficulty Analysis Inference
+
+The lesion-geometry section is secondary and should be described more cautiously than the headline headroom analysis.
+
+Locked interpretation:
+
+- continuous feature ranking is descriptive unless explicit inferential testing is implemented
+- Spearman `\rho` values may be reported as ranked associations
+- categorical summaries are descriptive only unless a formal grouped test is added and the category counts are adequate
+
+Do not claim:
+
+- Kruskal-Wallis testing
+- categorical significance
+- regression-based predictor effects
+
+unless those analyses are actually implemented in the pipeline and exported as deliverables.
+
 ### Sensitivity Analyses
 
 Locked sensitivity analyses:
 
 - real-core-level results versus family-aggregated real performance
 - single-real-core families versus multi-real-core families
+- family-aggregated paired Wilcoxon sensitivity for the main contrasts
 - optional supplementary threshold sensitivity if a threshold-based support metric is shown
 
 Not a paper-1 sensitivity priority:
@@ -582,9 +671,11 @@ Current deliverable CSV set:
 - `table_01_cohort_overview.csv`
 - `table_02_primary_headroom_summary.csv`
 - `table_03_safety_distance_summary.csv`
-- `table_04_biopsy_case_catalog.csv`
-- `table_05_targeting_feature_ranking.csv`
-- `table_06_targeting_location_summary.csv`
+- `table_04_group_mean_bootstrap_summary.csv`
+- `table_05_inference_method_comparison.csv`
+- `table_06_biopsy_case_catalog.csv`
+- `table_07_targeting_feature_ranking.csv`
+- `table_08_targeting_location_summary.csv`
 - `geometry_biopsy_level_table.csv`
 - `geometry_biopsy_level_summary.csv`
 - `geometry_voxelwise_table.csv`
@@ -748,14 +839,16 @@ Recommended main-text tables:
 1. `table_01_cohort_overview.csv`
 2. `table_02_primary_headroom_summary.csv`
 3. `table_03_safety_distance_summary.csv`
+4. `table_04_group_mean_bootstrap_summary.csv` if group means with uncertainty are quoted directly in Results
 
 ### Supplementary Tables
 
 Recommended supplementary tables:
 
-1. `table_04_biopsy_case_catalog.csv`
-2. `table_05_targeting_feature_ranking.csv`
-3. `table_06_targeting_location_summary.csv`
+1. `table_05_inference_method_comparison.csv`
+2. `table_06_biopsy_case_catalog.csv`
+3. `table_07_targeting_feature_ranking.csv`
+4. `table_08_targeting_location_summary.csv`
 4. `geometry_biopsy_level_summary.csv`
 5. `geometry_voxelwise_group_summary.csv`
 

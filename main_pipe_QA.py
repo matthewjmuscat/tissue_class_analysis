@@ -89,6 +89,11 @@ def main() -> None:
     _write_csv(qa_csv_dir / "qa_safety_delta_long.csv", stats_outputs.safety_delta_long_df)
     _write_csv(qa_csv_dir / "qa_safety_bootstrap_summary.csv", stats_outputs.safety_bootstrap_summary_df)
     _write_csv(qa_csv_dir / "qa_safety_bootstrap_samples.csv", stats_outputs.safety_bootstrap_samples_df)
+    _write_csv(qa_csv_dir / "qa_group_bootstrap_summary.csv", stats_outputs.group_bootstrap_summary_df)
+    _write_csv(qa_csv_dir / "qa_family_mean_delta_long.csv", stats_outputs.family_mean_delta_long_df)
+    _write_csv(qa_csv_dir / "qa_classical_paired_summary.csv", stats_outputs.classical_paired_summary_df)
+    _write_csv(qa_csv_dir / "qa_mixedlm_contrast_summary.csv", stats_outputs.mixedlm_contrast_summary_df)
+    _write_csv(qa_csv_dir / "qa_method_comparison_summary.csv", stats_outputs.method_comparison_summary_df)
     _write_csv(
         qa_csv_dir / "qa_plot_family_comparison_long.csv",
         plot_data_outputs.qa_plot_family_comparison_long,
@@ -142,15 +147,23 @@ def main() -> None:
         deliverable_outputs.safety_distance_table,
     )
     _write_csv(
-        deliverables_csv_dir / "table_04_biopsy_case_catalog.csv",
+        deliverables_csv_dir / "table_04_group_mean_bootstrap_summary.csv",
+        deliverable_outputs.group_mean_bootstrap_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_05_inference_method_comparison.csv",
+        deliverable_outputs.inference_method_comparison_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "table_06_biopsy_case_catalog.csv",
         deliverable_outputs.biopsy_case_catalog_table,
     )
     _write_csv(
-        deliverables_csv_dir / "table_05_targeting_feature_ranking.csv",
+        deliverables_csv_dir / "table_07_targeting_feature_ranking.csv",
         deliverable_outputs.targeting_feature_ranking_table,
     )
     _write_csv(
-        deliverables_csv_dir / "table_06_targeting_location_summary.csv",
+        deliverables_csv_dir / "table_08_targeting_location_summary.csv",
         deliverable_outputs.targeting_location_summary_table,
     )
     _write_csv(
@@ -256,6 +269,11 @@ def main() -> None:
             "qa_safety_delta_long": stats_outputs.safety_delta_long_df,
             "qa_safety_bootstrap_summary": stats_outputs.safety_bootstrap_summary_df,
             "qa_safety_bootstrap_samples": stats_outputs.safety_bootstrap_samples_df,
+            "qa_group_bootstrap_summary": stats_outputs.group_bootstrap_summary_df,
+            "qa_family_mean_delta_long": stats_outputs.family_mean_delta_long_df,
+            "qa_classical_paired_summary": stats_outputs.classical_paired_summary_df,
+            "qa_mixedlm_contrast_summary": stats_outputs.mixedlm_contrast_summary_df,
+            "qa_method_comparison_summary": stats_outputs.method_comparison_summary_df,
             "qa_plot_family_comparison_long": plot_data_outputs.qa_plot_family_comparison_long,
             "qa_plot_headroom_long": plot_data_outputs.qa_plot_headroom_long,
             "qa_plot_reference_disagreement": plot_data_outputs.qa_plot_reference_disagreement,
@@ -274,9 +292,11 @@ def main() -> None:
             "table_01_cohort_overview": deliverable_outputs.cohort_overview_table,
             "table_02_primary_headroom_summary": deliverable_outputs.primary_headroom_table,
             "table_03_safety_distance_summary": deliverable_outputs.safety_distance_table,
-            "table_04_biopsy_case_catalog": deliverable_outputs.biopsy_case_catalog_table,
-            "table_05_targeting_feature_ranking": deliverable_outputs.targeting_feature_ranking_table,
-            "table_06_targeting_location_summary": deliverable_outputs.targeting_location_summary_table,
+            "table_04_group_mean_bootstrap_summary": deliverable_outputs.group_mean_bootstrap_table,
+            "table_05_inference_method_comparison": deliverable_outputs.inference_method_comparison_table,
+            "table_06_biopsy_case_catalog": deliverable_outputs.biopsy_case_catalog_table,
+            "table_07_targeting_feature_ranking": deliverable_outputs.targeting_feature_ranking_table,
+            "table_08_targeting_location_summary": deliverable_outputs.targeting_location_summary_table,
             "geometry_biopsy_level_table": deliverable_outputs.geometric_biopsy_level_table,
             "geometry_biopsy_level_summary": deliverable_outputs.geometric_biopsy_level_summary_table,
             "geometry_voxelwise_table": deliverable_outputs.geometric_voxelwise_table,
