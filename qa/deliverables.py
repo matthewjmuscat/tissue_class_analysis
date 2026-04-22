@@ -43,6 +43,10 @@ class QADeliverableOutputs:
     geometric_biopsy_level_summary_table: pd.DataFrame
     geometric_voxelwise_table: pd.DataFrame
     geometric_voxelwise_group_summary_table: pd.DataFrame
+    signed_boundary_biopsy_level_table: pd.DataFrame
+    signed_boundary_biopsy_level_summary_table: pd.DataFrame
+    signed_boundary_voxelwise_table: pd.DataFrame
+    signed_boundary_voxelwise_summary_table: pd.DataFrame
 
 
 def _rename_for_manuscript_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -552,6 +556,121 @@ def build_geometric_biopsy_level_summary_table(geometric_biopsy_level_table: pd.
     return pd.DataFrame(rows).sort_values(["metric", "family_member_label"]).reset_index(drop=True)
 
 
+def _standardize_family_member_label(series: pd.Series) -> pd.Series:
+    return series.replace(
+        {
+            "Real": "Real",
+            "Centroid DIL": "Centroid",
+            "Optimal DIL": "Optimal",
+        }
+    )
+
+
+def build_signed_boundary_biopsy_level_table(
+    geometric_biopsy_level_table: pd.DataFrame,
+) -> pd.DataFrame:
+    structure_col_map = {
+        "DIL": "dil_boundary_nn_mean_mm",
+        "Prostate": "prostate_boundary_nn_mean_mm",
+        "Urethra": "urethra_boundary_nn_mean_mm",
+        "Rectum": "rectum_boundary_nn_mean_mm",
+    }
+    id_cols = [
+        "base_patient_id",
+        "patient_id",
+        "family_id",
+        "family_member_label",
+        "simulated_type",
+        "bx_id",
+        "bx_index",
+        "relative_dil_index",
+        "relative_dil_id",
+    ]
+    keep_id_cols = [col for col in id_cols if col in geometric_biopsy_level_table.columns]
+    rows: list[pd.DataFrame] = []
+    for structure_type, value_col in structure_col_map.items():
+        if value_col not in geometric_biopsy_level_table.columns:
+            continue
+        sub = geometric_biopsy_level_table[keep_id_cols + [value_col]].copy()
+        sub = sub.rename(columns={value_col: "signed_boundary_nn_dist_mean_mm"})
+        sub["structure_type"] = structure_type
+        rows.append(sub)
+    if not rows:
+        return pd.DataFrame(
+            columns=keep_id_cols
+            + [
+                "structure_type",
+                "signed_boundary_nn_dist_mean_mm",
+                "mean_position_relative_to_structure",
+                "distance_sign_convention",
+            ]
+        )
+    out = pd.concat(rows, ignore_index=True)
+    signed = pd.to_numeric(out["signed_boundary_nn_dist_mean_mm"], errors="coerce")
+    out["signed_boundary_nn_dist_mean_mm"] = signed
+    out["mean_position_relative_to_structure"] = np.where(
+        signed < 0.0,
+        "inside",
+        np.where(signed > 0.0, "outside", "on_boundary"),
+    )
+    out["distance_sign_convention"] = "negative=inside, positive=outside"
+    sort_cols = [col for col in ["structure_type", "family_member_label", "base_patient_id", "bx_index"] if col in out.columns]
+    return out.sort_values(sort_cols).reset_index(drop=True)
+
+
+def build_signed_boundary_biopsy_level_summary_table(
+    signed_boundary_biopsy_level_table: pd.DataFrame,
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    group_cols = ["structure_type", "family_member_label"]
+    if signed_boundary_biopsy_level_table.empty:
+        return pd.DataFrame(
+            columns=group_cols
+            + [
+                "metric",
+                "n",
+                "mean",
+                "median",
+                "q05",
+                "q25",
+                "q75",
+                "q95",
+                "min",
+                "max",
+                "fraction_inside",
+                "fraction_outside",
+                "fraction_on_boundary",
+                "distance_sign_convention",
+            ]
+        )
+    for group_key, sub in signed_boundary_biopsy_level_table.groupby(group_cols, dropna=False):
+        structure_type, family_member_label = group_key
+        values = pd.to_numeric(sub["signed_boundary_nn_dist_mean_mm"], errors="coerce").dropna()
+        if values.empty:
+            continue
+        rows.append(
+            {
+                "structure_type": structure_type,
+                "family_member_label": family_member_label,
+                "metric": "signed_boundary_nn_dist_mean_mm",
+                "n": int(values.shape[0]),
+                "mean": float(values.mean()),
+                "median": float(values.median()),
+                "q05": float(values.quantile(0.05)),
+                "q25": float(values.quantile(0.25)),
+                "q75": float(values.quantile(0.75)),
+                "q95": float(values.quantile(0.95)),
+                "min": float(values.min()),
+                "max": float(values.max()),
+                "fraction_inside": float((values < 0.0).mean()),
+                "fraction_outside": float((values > 0.0).mean()),
+                "fraction_on_boundary": float((values == 0.0).mean()),
+                "distance_sign_convention": "negative=inside, positive=outside",
+            }
+        )
+    return pd.DataFrame(rows).sort_values(group_cols).reset_index(drop=True)
+
+
 def _clean_distance_export_table(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out = out[out["Patient ID"].notna()].copy()
@@ -650,6 +769,114 @@ def build_geometric_voxelwise_group_summary_table(
     ).reset_index(drop=True)
 
 
+def build_signed_boundary_voxelwise_table(
+    geometric_voxelwise_table: pd.DataFrame,
+) -> pd.DataFrame:
+    keep_cols = [
+        "patient_id",
+        "bx_id",
+        "bx_index",
+        "simulated_type",
+        "relative_structure_roi",
+        "relative_structure_type",
+        "relative_structure_index",
+        "voxel_index",
+        "voxel_begin_z_mm",
+        "voxel_end_z_mm",
+        "voxel_mid_z_mm",
+        "boundary_nn_dist_mean_mm",
+        "boundary_nn_dist_min_mm",
+        "boundary_nn_dist_q05_mm",
+        "boundary_nn_dist_q25_mm",
+        "boundary_nn_dist_q50_mm",
+        "boundary_nn_dist_q75_mm",
+        "boundary_nn_dist_q95_mm",
+        "boundary_nn_dist_max_mm",
+    ]
+    keep_cols = [col for col in keep_cols if col in geometric_voxelwise_table.columns]
+    out = geometric_voxelwise_table[keep_cols].copy()
+    if "simulated_type" in out.columns:
+        out["family_member_label"] = _standardize_family_member_label(out["simulated_type"])
+    out = out.rename(
+        columns={
+            "boundary_nn_dist_mean_mm": "signed_boundary_nn_dist_mean_mm",
+            "boundary_nn_dist_min_mm": "signed_boundary_nn_dist_min_mm",
+            "boundary_nn_dist_q05_mm": "signed_boundary_nn_dist_q05_mm",
+            "boundary_nn_dist_q25_mm": "signed_boundary_nn_dist_q25_mm",
+            "boundary_nn_dist_q50_mm": "signed_boundary_nn_dist_q50_mm",
+            "boundary_nn_dist_q75_mm": "signed_boundary_nn_dist_q75_mm",
+            "boundary_nn_dist_q95_mm": "signed_boundary_nn_dist_q95_mm",
+            "boundary_nn_dist_max_mm": "signed_boundary_nn_dist_max_mm",
+        }
+    )
+    out["distance_sign_convention"] = "negative=inside, positive=outside"
+    sort_cols = [
+        col
+        for col in [
+            "relative_structure_type",
+            "family_member_label",
+            "patient_id",
+            "bx_index",
+            "voxel_index",
+        ]
+        if col in out.columns
+    ]
+    return out.sort_values(sort_cols).reset_index(drop=True)
+
+
+def build_signed_boundary_voxelwise_summary_table(
+    signed_boundary_voxelwise_table: pd.DataFrame,
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    group_cols = ["relative_structure_type", "family_member_label"]
+    if signed_boundary_voxelwise_table.empty:
+        return pd.DataFrame(
+            columns=group_cols
+            + [
+                "metric",
+                "n_rows",
+                "mean",
+                "median",
+                "q05",
+                "q25",
+                "q75",
+                "q95",
+                "min",
+                "max",
+                "fraction_inside",
+                "fraction_outside",
+                "fraction_on_boundary",
+                "distance_sign_convention",
+            ]
+        )
+    for group_key, sub in signed_boundary_voxelwise_table.groupby(group_cols, dropna=False):
+        relative_structure_type, family_member_label = group_key
+        values = pd.to_numeric(sub["signed_boundary_nn_dist_mean_mm"], errors="coerce").dropna()
+        if values.empty:
+            continue
+        rows.append(
+            {
+                "relative_structure_type": relative_structure_type,
+                "family_member_label": family_member_label,
+                "metric": "signed_boundary_nn_dist_mean_mm",
+                "n_rows": int(values.shape[0]),
+                "mean": float(values.mean()),
+                "median": float(values.median()),
+                "q05": float(values.quantile(0.05)),
+                "q25": float(values.quantile(0.25)),
+                "q75": float(values.quantile(0.75)),
+                "q95": float(values.quantile(0.95)),
+                "min": float(values.min()),
+                "max": float(values.max()),
+                "fraction_inside": float((values < 0.0).mean()),
+                "fraction_outside": float((values > 0.0).mean()),
+                "fraction_on_boundary": float((values == 0.0).mean()),
+                "distance_sign_convention": "negative=inside, positive=outside",
+            }
+        )
+    return pd.DataFrame(rows).sort_values(group_cols).reset_index(drop=True)
+
+
 def build_qa_deliverable_outputs(
     source_tables: QASourceTables,
     family_outputs: QAFamilyOutputs,
@@ -658,6 +885,12 @@ def build_qa_deliverable_outputs(
 ) -> QADeliverableOutputs:
     geometric_biopsy_level_table = build_geometric_biopsy_level_table(family_outputs)
     geometric_voxelwise_table = build_geometric_voxelwise_table(source_tables)
+    signed_boundary_biopsy_level_table = build_signed_boundary_biopsy_level_table(
+        geometric_biopsy_level_table
+    )
+    signed_boundary_voxelwise_table = build_signed_boundary_voxelwise_table(
+        geometric_voxelwise_table
+    )
     return QADeliverableOutputs(
         cohort_overview_table=build_cohort_overview_table(family_outputs),
         primary_headroom_table=build_primary_headroom_table(stats_outputs),
@@ -674,5 +907,13 @@ def build_qa_deliverable_outputs(
         geometric_voxelwise_table=geometric_voxelwise_table,
         geometric_voxelwise_group_summary_table=build_geometric_voxelwise_group_summary_table(
             geometric_voxelwise_table
+        ),
+        signed_boundary_biopsy_level_table=signed_boundary_biopsy_level_table,
+        signed_boundary_biopsy_level_summary_table=build_signed_boundary_biopsy_level_summary_table(
+            signed_boundary_biopsy_level_table
+        ),
+        signed_boundary_voxelwise_table=signed_boundary_voxelwise_table,
+        signed_boundary_voxelwise_summary_table=build_signed_boundary_voxelwise_summary_table(
+            signed_boundary_voxelwise_table
         ),
     )

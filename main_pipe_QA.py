@@ -182,6 +182,22 @@ def main() -> None:
         deliverables_csv_dir / "geometry_voxelwise_group_summary.csv",
         deliverable_outputs.geometric_voxelwise_group_summary_table,
     )
+    _write_csv(
+        deliverables_csv_dir / "geometry_signed_boundary_biopsy_level_table.csv",
+        deliverable_outputs.signed_boundary_biopsy_level_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "geometry_signed_boundary_biopsy_level_summary.csv",
+        deliverable_outputs.signed_boundary_biopsy_level_summary_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "geometry_signed_boundary_voxelwise_table.csv",
+        deliverable_outputs.signed_boundary_voxelwise_table,
+    )
+    _write_csv(
+        deliverables_csv_dir / "geometry_signed_boundary_voxelwise_summary.csv",
+        deliverable_outputs.signed_boundary_voxelwise_summary_table,
+    )
 
     figure_paths = {
         "headline_family_comparison": production_plots_QA.plot_headline_family_comparison(
@@ -301,6 +317,10 @@ def main() -> None:
             "geometry_biopsy_level_summary": deliverable_outputs.geometric_biopsy_level_summary_table,
             "geometry_voxelwise_table": deliverable_outputs.geometric_voxelwise_table,
             "geometry_voxelwise_group_summary": deliverable_outputs.geometric_voxelwise_group_summary_table,
+            "geometry_signed_boundary_biopsy_level_table": deliverable_outputs.signed_boundary_biopsy_level_table,
+            "geometry_signed_boundary_biopsy_level_summary": deliverable_outputs.signed_boundary_biopsy_level_summary_table,
+            "geometry_signed_boundary_voxelwise_table": deliverable_outputs.signed_boundary_voxelwise_table,
+            "geometry_signed_boundary_voxelwise_summary": deliverable_outputs.signed_boundary_voxelwise_summary_table,
         }
     )
     _write_csv(manifests_dir / "qa_deliverable_inventory.csv", deliverable_inventory)

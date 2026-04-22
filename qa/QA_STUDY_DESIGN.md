@@ -680,6 +680,15 @@ Current deliverable CSV set:
 - `geometry_biopsy_level_summary.csv`
 - `geometry_voxelwise_table.csv`
 - `geometry_voxelwise_group_summary.csv`
+- `geometry_signed_boundary_biopsy_level_table.csv`
+- `geometry_signed_boundary_biopsy_level_summary.csv`
+- `geometry_signed_boundary_voxelwise_table.csv`
+- `geometry_signed_boundary_voxelwise_summary.csv`
+
+Locked sign convention for signed boundary nearest-neighbour distances:
+
+- negative = inside the relative structure
+- positive = outside the relative structure
 
 These should be treated as the paper-writing layer, while the files under [output_data_QA/csv/qa](</home/matthew-muscat/Documents/UBC/Research/biopsy_tissue_class_stat_analysis_corrected/output_data_QA/csv/qa>) remain the full analysis layer.
 
