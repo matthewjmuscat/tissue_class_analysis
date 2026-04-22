@@ -12,7 +12,7 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+from matplotlib.patches import Ellipse, Patch
 from matplotlib.ticker import AutoMinorLocator
 
 from qa.config import QAFigureExportConfig
@@ -199,6 +199,31 @@ def _add_outside_panel_box(
     )
 
 
+def _add_inside_panel_box(
+    ax,
+    text: str | None,
+    export_config: QAFigureExportConfig,
+    *,
+    x: float = 0.97,
+    y: float = 0.03,
+    ha: str = "right",
+    va: str = "bottom",
+) -> None:
+    if not text:
+        return
+    ax.text(
+        x,
+        y,
+        text,
+        transform=ax.transAxes,
+        ha=ha,
+        va=va,
+        fontsize=export_config.annotation_fontsize - 1,
+        bbox=ANNOT_BBOX,
+        zorder=6,
+    )
+
+
 def _style_axes(
     ax,
     export_config: QAFigureExportConfig,
@@ -250,6 +275,8 @@ def _format_p_value(p_value: float) -> str:
         return "NA"
     if p_value < 0.001:
         return "p < 0.001"
+    if p_value < 0.01:
+        return "p < 0.01"
     return f"p = {p_value:.2f}"
 
 
@@ -354,7 +381,7 @@ def _format_regression_box(
 ) -> str:
     fit = stats.linregress(x, y)
     slope_units = "" if not inv_units else f" {inv_units}"
-    p_text = "p < 0.001" if fit.pvalue < 0.001 else f"p = {fit.pvalue:.2f}"
+    p_text = _format_p_value(float(fit.pvalue))
     rho_s = pd.Series(x).corr(pd.Series(y), method="spearman")
     return "\n".join(
         [
@@ -363,6 +390,93 @@ def _format_regression_box(
             rf"$\rho_s = {rho_s:+.2f}$",
         ]
     )
+
+
+def _choose_annotation_offset(
+    ax,
+    x: float,
+    y: float,
+    *,
+    all_points: np.ndarray,
+    used_label_positions: list[np.ndarray],
+    forbidden_axes_regions: Sequence[tuple[tuple[float, float], tuple[float, float]]] | None = None,
+) -> tuple[int, int]:
+    candidate_offsets = [
+        (16, 16),
+        (16, -16),
+        (-16, 16),
+        (-16, -16),
+        (24, 0),
+        (-24, 0),
+        (0, 24),
+        (0, -24),
+        (30, 12),
+        (-30, 12),
+        (30, -12),
+        (-30, -12),
+    ]
+    anchor_disp = ax.transData.transform((x, y))
+    point_disp = ax.transData.transform(all_points)
+
+    best_offset = candidate_offsets[0]
+    best_score = float("-inf")
+    for dx, dy in candidate_offsets:
+        label_pos = anchor_disp + np.array([dx, dy], dtype=float)
+        point_dists = np.linalg.norm(point_disp - label_pos, axis=1)
+        min_point_dist = float(np.min(point_dists)) if len(point_dists) else 0.0
+        used_dists = [float(np.linalg.norm(prev - label_pos)) for prev in used_label_positions]
+        min_used_dist = min(used_dists) if used_dists else 1000.0
+        direction_bonus = 6.0 if dy > 0 else 0.0
+        penalty = 0.0
+        if forbidden_axes_regions:
+            label_axes = ax.transAxes.inverted().transform(label_pos)
+            for (x0, x1), (y0, y1) in forbidden_axes_regions:
+                if x0 <= label_axes[0] <= x1 and y0 <= label_axes[1] <= y1:
+                    penalty += 500.0
+        score = min_point_dist + 0.7 * min_used_dist + direction_bonus - penalty
+        if score > best_score:
+            best_score = score
+            best_offset = (dx, dy)
+    return best_offset
+
+
+def _draw_covariance_ellipse(
+    ax,
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    edgecolor: str,
+    linewidth: float = 1.7,
+    linestyle: tuple[int, tuple[int, ...]] | str = (0, (5, 3)),
+    alpha: float = 1.0,
+) -> None:
+    if len(x) < 3:
+        return
+    cov = np.cov(x, y)
+    if not np.all(np.isfinite(cov)):
+        return
+    vals, vecs = np.linalg.eigh(cov)
+    order = vals.argsort()[::-1]
+    vals = vals[order]
+    vecs = vecs[:, order]
+    if np.any(vals <= 0):
+        return
+    angle = float(np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0])))
+    chi2_scale = float(np.sqrt(stats.chi2.ppf(0.95, 2)))
+    width, height = 2.0 * chi2_scale * np.sqrt(vals)
+    ellipse = Ellipse(
+        xy=(float(np.mean(x)), float(np.mean(y))),
+        width=float(width),
+        height=float(height),
+        angle=angle,
+        facecolor="none",
+        edgecolor=edgecolor,
+        linewidth=linewidth,
+        linestyle=linestyle,
+        alpha=alpha,
+        zorder=2,
+    )
+    ax.add_patch(ellipse)
 
 
 def _draw_feature_regression_panel(
@@ -968,8 +1082,6 @@ def plot_reference_disagreement(
             "Identity line",
         ]
 
-        annotation_offsets = [(-14, 12), (10, 14), (12, -14), (-16, -12), (18, 0), (-18, 0)]
-
         for panel_idx, (ax, metric) in enumerate(zip(axes, metrics, strict=False)):
             sub = reference_disagreement_df[reference_disagreement_df["metric"] == metric].copy()
             if sub.empty:
@@ -1010,8 +1122,18 @@ def plot_reference_disagreement(
                     linewidth=0.8,
                     zorder=3,
                 )
-                for idx, (_, row) in enumerate(highlight_df.iterrows()):
-                    dx, dy = annotation_offsets[idx % len(annotation_offsets)]
+                all_points = sub[["centroid_value", "optimal_value"]].to_numpy(dtype=float)
+                used_label_positions: list[np.ndarray] = []
+                forbidden_regions = [((0.02, 0.72), (0.66, 0.99))]
+                for _, row in highlight_df.iterrows():
+                    dx, dy = _choose_annotation_offset(
+                        ax,
+                        float(row["centroid_value"]),
+                        float(row["optimal_value"]),
+                        all_points=all_points,
+                        used_label_positions=used_label_positions,
+                        forbidden_axes_regions=forbidden_regions,
+                    )
                     txt = ax.annotate(
                         str(row[label_col]),
                         xy=(row["centroid_value"], row["optimal_value"]),
@@ -1032,6 +1154,10 @@ def plot_reference_disagreement(
                         zorder=4,
                     )
                     txt.set_path_effects([pe.withStroke(linewidth=2.0, foreground="white")])
+                    used_label_positions.append(
+                        ax.transData.transform((float(row["centroid_value"]), float(row["optimal_value"])))
+                        + np.array([dx, dy], dtype=float)
+                    )
 
             mean_delta = float(sub["delta_value"].mean())
             median_delta = float(sub["delta_value"].median())
@@ -1764,7 +1890,7 @@ def plot_targeting_difficulty_summary(
 
     df = family_difficulty_df.copy()
     y_col = "delta_centroid_minus_real_mean__DIL Global Mean BE"
-    y_label = r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$"
+    y_label = r"$\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$"
     return _plot_difficulty_mixed_summary(
         df,
         save_dir,
@@ -1817,7 +1943,7 @@ def plot_targeting_difficulty_continuous(
         df,
         save_dir,
         y_col=y_col,
-        y_label=r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
+        y_label=r"$\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
         color=CONTRAST_COLOR_MAP["centroid_minus_real"],
         y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.04, high_floor=0.74),
         export_config=export_config,
@@ -1865,9 +1991,223 @@ def plot_targeting_difficulty_categorical(
         df,
         save_dir,
         y_col=y_col,
-        y_label=r"Targeting difficulty $\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
+        y_label=r"$\Delta^{(C-R)}\langle \mathcal{P}_{D} \rangle$",
         color=CONTRAST_COLOR_MAP["centroid_minus_real"],
         y_lim=_difficulty_y_limits(df, y_col, low_floor=-0.04, high_floor=0.74),
         export_config=export_config,
         file_stem=file_stem,
     )
+
+
+def _localization_summary_text(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    x_symbol: str,
+    y_symbol: str,
+) -> str:
+    return "\n".join(
+        [
+            rf"$\mu_{{{x_symbol}}} = {np.mean(x):+.2f}$ mm, $\sigma_{{{x_symbol}}} = {np.std(x, ddof=1):.2f}$ mm",
+            rf"$\mu_{{{y_symbol}}} = {np.mean(y):+.2f}$ mm, $\sigma_{{{y_symbol}}} = {np.std(y, ddof=1):.2f}$ mm",
+            rf"$n = {len(x)}$ real cores",
+            "Dashed ellipse: 95% covariance contour",
+        ]
+    )
+
+
+def _plot_localization_panel(
+    fig: mpl.figure.Figure,
+    spec,
+    df: pd.DataFrame,
+    *,
+    x_col: str,
+    y_col: str,
+    x_label: str,
+    y_label: str,
+    x_symbol: str,
+    y_symbol: str,
+    plane_label: str,
+    panel_label: str,
+    export_config: QAFigureExportConfig,
+    norm,
+    cmap,
+) -> tuple[object, str | None, object]:
+    gs = spec.subgridspec(
+        2,
+        2,
+        height_ratios=[0.24, 1.0],
+        width_ratios=[1.0, 0.24],
+        hspace=0.05,
+        wspace=0.05,
+    )
+    ax_top = fig.add_subplot(gs[0, 0])
+    ax_main = fig.add_subplot(gs[1, 0], sharex=ax_top)
+    ax_right = fig.add_subplot(gs[1, 1], sharey=ax_main)
+
+    x = df[x_col].to_numpy(dtype=float)
+    y = df[y_col].to_numpy(dtype=float)
+    c = df["DIL Global Mean BE"].to_numpy(dtype=float)
+    scatter = ax_main.scatter(
+        x,
+        y,
+        c=c,
+        cmap=cmap,
+        norm=norm,
+        s=74,
+        edgecolor="white",
+        linewidth=0.8,
+        alpha=0.96,
+        zorder=3,
+    )
+    _draw_covariance_ellipse(ax_main, x, y, edgecolor=HIGHLIGHT_COLOR, alpha=0.9)
+    ax_main.plot(np.mean(x), np.mean(y), marker="+", color="black", markersize=12, markeredgewidth=1.8, zorder=4)
+    ax_main.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+    ax_main.axvline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+
+    max_abs = max(np.max(np.abs(x)), np.max(np.abs(y)))
+    max_abs = float(np.ceil(max_abs + 1.0))
+    ax_main.set_xlim(-max_abs, max_abs)
+    ax_main.set_ylim(-max_abs, max_abs)
+    ax_main.set_aspect("equal", adjustable="box")
+    ax_main.set_xlabel(x_label)
+    ax_main.set_ylabel(y_label)
+    _style_axes(ax_main, export_config, x_minor_ticks=2)
+    _add_panel_label(ax_main, panel_label, export_config)
+    ax_main.text(
+        0.03,
+        0.97,
+        plane_label,
+        transform=ax_main.transAxes,
+        ha="left",
+        va="top",
+        fontsize=export_config.title_fontsize - 1,
+        style="italic",
+    )
+
+    bins = np.linspace(-max_abs, max_abs, 15)
+    ax_top.hist(x, bins=bins, color="#d4d4d4", edgecolor="white", linewidth=0.7)
+    ax_top.axvline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)))
+    ax_right.hist(y, bins=bins, orientation="horizontal", color="#d4d4d4", edgecolor="white", linewidth=0.7)
+    ax_right.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)))
+
+    ax_top.tick_params(axis="x", which="both", labelbottom=False)
+    ax_top.tick_params(axis="y", which="both", left=False, labelleft=False)
+    ax_right.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+    ax_right.tick_params(axis="y", which="both", labelleft=False)
+    for side in ["top", "right", "left"]:
+        ax_top.spines[side].set_visible(False)
+    for side in ["top", "right", "bottom"]:
+        ax_right.spines[side].set_visible(False)
+    ax_top.grid(visible=False)
+    ax_right.grid(visible=False)
+
+    labeled = df[df["Selected biopsy heading"].notna()].copy()
+    if not labeled.empty:
+        all_points = df[[x_col, y_col]].to_numpy(dtype=float)
+        used_label_positions: list[np.ndarray] = []
+        for _, row in labeled.iterrows():
+            dx, dy = _choose_annotation_offset(
+                ax_main,
+                float(row[x_col]),
+                float(row[y_col]),
+                all_points=all_points,
+                used_label_positions=used_label_positions,
+            )
+            txt = ax_main.annotate(
+                str(row["Selected biopsy heading"]),
+                xy=(float(row[x_col]), float(row[y_col])),
+                xytext=(dx, dy),
+                textcoords="offset points",
+                ha="left" if dx >= 0 else "right",
+                va="bottom" if dy >= 0 else "top",
+                fontsize=export_config.annotation_fontsize,
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=0.2),
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color="#4a4a4a",
+                    linewidth=0.7,
+                    shrinkA=3,
+                    shrinkB=3,
+                ),
+                zorder=5,
+            )
+            txt.set_path_effects([pe.withStroke(linewidth=2.0, foreground="white")])
+            used_label_positions.append(
+                ax_main.transData.transform((float(row[x_col]), float(row[y_col])))
+                + np.array([dx, dy], dtype=float)
+            )
+
+    return ax_main, _localization_summary_text(x, y, x_symbol=x_symbol, y_symbol=y_symbol), scatter
+
+
+def plot_localization_accuracy_centroids(
+    localization_real_df: pd.DataFrame,
+    save_dir: str | Path,
+    *,
+    export_config: QAFigureExportConfig = QAFigureExportConfig(),
+    file_stem: str = "Fig_QA_13_localization_accuracy_centroids",
+) -> list[Path]:
+    if localization_real_df.empty:
+        return []
+
+    df = localization_real_df.copy()
+    df = df.dropna(
+        subset=[
+            "Bx (X, DIL centroid frame)",
+            "Bx (Y, DIL centroid frame)",
+            "Bx (Z, DIL centroid frame)",
+            "DIL Global Mean BE",
+        ]
+    ).copy()
+    if df.empty:
+        return []
+
+    cmap = mpl.cm.get_cmap("cividis")
+    norm = mpl.colors.Normalize(vmin=0.0, vmax=1.0)
+
+    with _font_rc(export_config):
+        fig = plt.figure(figsize=(15.6, 7.8), dpi=export_config.dpi)
+        outer = fig.add_gridspec(1, 2, wspace=0.24)
+
+        left_ax, left_text, scatter = _plot_localization_panel(
+            fig,
+            outer[0, 0],
+            df,
+            x_col="Bx (X, DIL centroid frame)",
+            y_col="Bx (Y, DIL centroid frame)",
+            x_label="L/R offset from DIL centroid (mm)\nL(+), R(-)",
+            y_label="A/P offset from DIL centroid (mm)\nP(+), A(-)",
+            x_symbol="x",
+            y_symbol="y",
+            plane_label="Transverse plane",
+            panel_label="A",
+            export_config=export_config,
+            norm=norm,
+            cmap=cmap,
+        )
+        right_ax, right_text, _ = _plot_localization_panel(
+            fig,
+            outer[0, 1],
+            df,
+            x_col="Bx (Z, DIL centroid frame)",
+            y_col="Bx (Y, DIL centroid frame)",
+            x_label="S/I offset from DIL centroid (mm)\nS(+), I(-)",
+            y_label="A/P offset from DIL centroid (mm)\nP(+), A(-)",
+            x_symbol="z",
+            y_symbol="y",
+            plane_label="Sagittal plane",
+            panel_label="B",
+            export_config=export_config,
+            norm=norm,
+            cmap=cmap,
+        )
+
+        fig.subplots_adjust(top=0.88, bottom=0.11, right=0.90)
+        cax = fig.add_axes([0.915, 0.17, 0.018, 0.66])
+        cbar = fig.colorbar(scatter, cax=cax)
+        cbar.set_label(r"$\langle \mathcal{P}_{D} \rangle$")
+
+        _add_inside_panel_box(left_ax, left_text, export_config, x=0.97, y=0.03)
+        _add_inside_panel_box(right_ax, right_text, export_config, x=0.97, y=0.03)
+        return _save_figure_multi(fig, save_dir, file_stem, export_config)

@@ -66,6 +66,7 @@ class QAPlotDataOutputs:
     qa_plot_safety_distance_long: pd.DataFrame
     qa_plot_selected_profile_long: pd.DataFrame
     qa_selected_profile_cases: pd.DataFrame
+    qa_plot_localization_real: pd.DataFrame
     qa_family_optimizer_difficulty: pd.DataFrame
     qa_targeting_difficulty_correlations: pd.DataFrame
     qa_targeting_difficulty_group_summary: pd.DataFrame
@@ -251,6 +252,88 @@ def build_reference_disagreement_df(family_outputs: QAFamilyOutputs) -> pd.DataF
         out.groupby("metric")["abs_delta_value"].rank(method="first", ascending=False).astype(int)
     )
     return out.sort_values(["metric", "abs_delta_rank", "Family ID"]).reset_index(drop=True)
+
+
+def build_localization_real_df(
+    source_tables: QASourceTables,
+    family_outputs: QAFamilyOutputs,
+    selected_profile_cases_df: pd.DataFrame,
+) -> pd.DataFrame:
+    nearest = source_tables.cohort_nearest_dils_df.copy()
+    nearest = nearest[
+        (nearest["Simulated bool"] == False)
+        & (nearest["Target DIL (by centroids)"] == True)
+    ].copy()
+    nearest["Relative DIL index"] = pd.to_numeric(
+        nearest["Relative DIL index"], errors="coerce"
+    ).astype("Int64")
+
+    real_meta = family_outputs.qa_real_core_pairs[
+        [
+            "Patient ID",
+            "Bx ID",
+            "Relative DIL index",
+            "Base patient ID",
+            "Family ID",
+            "Family_real_core_count",
+            "Length (mm)",
+            "DIL Global Mean BE",
+            "DIL Global Max BE",
+            "BX to DIL centroid distance",
+        ]
+    ].drop_duplicates(
+        subset=["Patient ID", "Bx ID", "Relative DIL index"],
+        keep="first",
+    )
+    out = nearest.merge(
+        real_meta,
+        on=["Patient ID", "Bx ID", "Relative DIL index"],
+        how="inner",
+        validate="1:1",
+        suffixes=("", "_meta"),
+    )
+
+    selected_label_map: dict[str, str] = {}
+    if not selected_profile_cases_df.empty:
+        selected_label_map = dict(
+            zip(
+                (
+                    selected_profile_cases_df["Patient ID"].astype(str)
+                    + "::"
+                    + selected_profile_cases_df["Bx ID"].astype(str)
+                ),
+                selected_profile_cases_df["Biopsy heading"].astype(str),
+                strict=False,
+            )
+        )
+    out["Selected biopsy heading"] = (
+        out["Patient ID"].astype(str) + "::" + out["Bx ID"].astype(str)
+    ).map(selected_label_map)
+
+    keep_cols = [
+        "Base patient ID",
+        "Family ID",
+        "Family_real_core_count",
+        "Patient ID",
+        "Bx ID",
+        "Relative DIL ID",
+        "Relative DIL index",
+        "Selected biopsy heading",
+        "Length (mm)",
+        "DIL Global Mean BE",
+        "DIL Global Max BE",
+        "BX to DIL centroid distance",
+        "Bx (X, DIL centroid frame)",
+        "Bx (Y, DIL centroid frame)",
+        "Bx (Z, DIL centroid frame)",
+        "Bx position in prostate LR",
+        "Bx position in prostate AP",
+        "Bx position in prostate SI",
+    ]
+    keep_cols = [col for col in keep_cols if col in out.columns]
+    return out[keep_cols].sort_values(
+        ["Base patient ID", "Relative DIL index", "Patient ID", "Bx ID"]
+    ).reset_index(drop=True)
 
 
 def _pick_real_core_for_family(
@@ -808,11 +891,20 @@ def apply_reference_case_labels(
         )
 
     case_label_map = dict(explicit_label_map)
-    case_counter = 1
+    used_biopsy_letters = {
+        label.replace("Biopsy ", "").strip()
+        for label in explicit_label_map.values()
+        if str(label).startswith("Biopsy ")
+    }
+    case_counter = 0
     for family_id in dict.fromkeys(top_family_ids):
         if family_id in case_label_map:
             continue
-        case_label_map[family_id] = f"Case {case_counter}"
+        while _alpha_code(case_counter) in used_biopsy_letters:
+            case_counter += 1
+        next_letter = _alpha_code(case_counter)
+        case_label_map[family_id] = f"Biopsy {next_letter}"
+        used_biopsy_letters.add(next_letter)
         case_counter += 1
 
     out["Family figure label"] = (
@@ -845,6 +937,11 @@ def build_qa_plot_data_outputs(
         selected_profile_cases_df,
     )
     family_optimizer_difficulty_df = build_family_optimizer_difficulty_df(family_outputs)
+    localization_real_df = build_localization_real_df(
+        source_tables,
+        family_outputs,
+        selected_profile_cases_df,
+    )
     return QAPlotDataOutputs(
         qa_plot_family_comparison_long=build_family_comparison_long_df(family_outputs),
         qa_plot_headroom_long=build_headroom_long_df(stats_outputs),
@@ -855,6 +952,7 @@ def build_qa_plot_data_outputs(
             selected_profile_cases_df,
         ),
         qa_selected_profile_cases=selected_profile_cases_df,
+        qa_plot_localization_real=localization_real_df,
         qa_family_optimizer_difficulty=family_optimizer_difficulty_df,
         qa_targeting_difficulty_correlations=build_targeting_difficulty_correlations_df(
             family_optimizer_difficulty_df

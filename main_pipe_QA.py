@@ -106,6 +106,10 @@ def main() -> None:
         plot_data_outputs.qa_selected_profile_cases,
     )
     _write_csv(
+        qa_csv_dir / "qa_plot_localization_real.csv",
+        plot_data_outputs.qa_plot_localization_real,
+    )
+    _write_csv(
         qa_csv_dir / "qa_family_optimizer_difficulty.csv",
         plot_data_outputs.qa_family_optimizer_difficulty,
     )
@@ -151,6 +155,11 @@ def main() -> None:
         "selected_dil_profiles_step": production_plots_QA.plot_selected_dil_profiles_step(
             plot_data_outputs.qa_plot_selected_profile_long,
             plot_data_outputs.qa_selected_profile_cases,
+            qa_fig_dir,
+            export_config=export_config,
+        ),
+        "localization_accuracy_centroids": production_plots_QA.plot_localization_accuracy_centroids(
+            plot_data_outputs.qa_plot_localization_real,
             qa_fig_dir,
             export_config=export_config,
         ),
@@ -205,6 +214,7 @@ def main() -> None:
             "qa_plot_safety_distance_long": plot_data_outputs.qa_plot_safety_distance_long,
             "qa_plot_selected_profile_long": plot_data_outputs.qa_plot_selected_profile_long,
             "qa_selected_profile_cases": plot_data_outputs.qa_selected_profile_cases,
+            "qa_plot_localization_real": plot_data_outputs.qa_plot_localization_real,
             "qa_family_optimizer_difficulty": plot_data_outputs.qa_family_optimizer_difficulty,
             "qa_targeting_difficulty_correlations": plot_data_outputs.qa_targeting_difficulty_correlations,
             "qa_targeting_difficulty_group_summary": plot_data_outputs.qa_targeting_difficulty_group_summary,

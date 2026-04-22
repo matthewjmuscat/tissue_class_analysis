@@ -21,6 +21,7 @@ class QASourceTables:
     config: QAStudyConfig
     paths: QADataPaths
     cohort_biopsy_basic_spatial_features_df: pd.DataFrame
+    cohort_nearest_dils_df: pd.DataFrame
     cohort_global_sum_to_one_tissue_df: pd.DataFrame
     cohort_sum_to_one_mc_results_df: pd.DataFrame
     cohort_3d_radiomic_features_all_oar_dil_df: pd.DataFrame
@@ -46,6 +47,9 @@ def load_qa_source_tables(config: QAStudyConfig | None = None) -> QASourceTables
 
     cohort_biopsy_basic_spatial_features_df = load_files.load_csv_as_dataframe(
         paths.cohort_csvs_directory / "Cohort: Biopsy basic spatial features dataframe.csv"
+    )
+    cohort_nearest_dils_df = load_files.load_csv_as_dataframe(
+        paths.cohort_csvs_directory / "Cohort: Nearest DILs to each biopsy.csv"
     )
     cohort_global_sum_to_one_tissue_df = load_files.load_csv_as_dataframe(
         paths.cohort_csvs_directory / "Cohort: global sum-to-one mc results.csv"
@@ -74,6 +78,7 @@ def load_qa_source_tables(config: QAStudyConfig | None = None) -> QASourceTables
         config=config,
         paths=paths,
         cohort_biopsy_basic_spatial_features_df=cohort_biopsy_basic_spatial_features_df,
+        cohort_nearest_dils_df=cohort_nearest_dils_df,
         cohort_global_sum_to_one_tissue_df=cohort_global_sum_to_one_tissue_df,
         cohort_sum_to_one_mc_results_df=cohort_sum_to_one_mc_results_df,
         cohort_3d_radiomic_features_all_oar_dil_df=cohort_3d_radiomic_features_all_oar_dil_df,
