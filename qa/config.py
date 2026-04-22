@@ -53,9 +53,9 @@ class QAStudyConfig:
 class QAFigureExportConfig:
     save_formats: tuple[str, ...] = ("pdf", "svg")
     dpi: int = 300
-    axes_label_fontsize: int = 17
+    axes_label_fontsize: int = 16
     tick_label_fontsize: int = 14
-    legend_fontsize: int = 14
-    annotation_fontsize: int = 13
+    legend_fontsize: int = 16
+    annotation_fontsize: int = 14
     title_fontsize: int = 18
     panel_label_fontsize: int = 19

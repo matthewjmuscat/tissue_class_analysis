@@ -396,7 +396,6 @@ def _format_regression_box(
         ]
     )
 
-
 def _choose_annotation_offset(
     ax,
     x: float,
@@ -410,71 +409,108 @@ def _choose_annotation_offset(
     inv_cov: np.ndarray | None = None,
     ellipse_scale: float | None = None,
 ) -> tuple[int, int]:
-    if candidate_offsets is None:
-        if mean_xy is not None:
-            sx = 1 if x >= float(mean_xy[0]) else -1
-            sy = 1 if y >= float(mean_xy[1]) else -1
-            candidate_offsets = [
-                (22 * sx, 18 * sy),
-                (30 * sx, 22 * sy),
-                (18 * sx, 30 * sy),
-                (38 * sx, 24 * sy),
-                (24 * sx, 38 * sy),
-                (30 * sx, 10 * sy),
-                (10 * sx, 30 * sy),
-                (16 * sx, -18 * sy),
-                (-18 * sx, 16 * sy),
-                (42 * sx, 12 * sy),
-                (12 * sx, 42 * sy),
-            ]
-        else:
-            candidate_offsets = [
-                (16, 16),
-                (16, -16),
-                (-16, 16),
-                (-16, -16),
-                (24, 0),
-                (-24, 0),
-                (0, 24),
-                (0, -24),
-                (30, 12),
-                (-30, 12),
-                (30, -12),
-                (-30, -12),
-            ]
+    """Score candidate annotation offsets and return the best one.
+
+    Scoring criteria (display-space pixels unless noted):
+    - Maximise distance from the nearest data point.
+    - Maximise distance from previously placed labels.
+    - Graduated bonus for landing outside the 95% covariance ellipse.
+    - Graduated penalty for landing inside the ellipse (deeper → larger penalty).
+    - Heavy penalty for landing outside the visible axes area (near-hard constraint).
+    - Heavy penalty for landing in a declared forbidden axes region.
+    - Cosine-weighted bonus for pointing outward from the cloud centre.
+    """
     anchor_disp = ax.transData.transform((x, y))
     point_disp = ax.transData.transform(all_points)
+
+    # Pre-compute the outward direction from the cloud centre in display space.
+    outward_unit: np.ndarray | None = None
+    if mean_xy is not None:
+        center_disp = ax.transData.transform((float(mean_xy[0]), float(mean_xy[1])))
+        outward_vec = anchor_disp - center_disp
+        outward_norm = float(np.linalg.norm(outward_vec))
+        if outward_norm > 1e-6:
+            outward_unit = outward_vec / outward_norm
+
+    if candidate_offsets is None:
+        # Build a dense candidate set: 16 evenly-spaced angles × 3 radii = 48 candidates,
+        # covering all directions uniformly rather than only cardinal/diagonal directions.
+        angles_rad = np.linspace(0, 2 * np.pi, 17)[:-1]  # 16 angles: 0°…337.5°
+        radii = [18.0, 30.0, 44.0]
+        raw: list[tuple[int, int]] = [
+            (int(round(r * np.cos(a))), int(round(r * np.sin(a))))
+            for r in radii
+            for a in angles_rad
+        ]
+        seen: set[tuple[int, int]] = set()
+        all_candidates: list[tuple[int, int]] = []
+        for pair in raw:
+            if pair not in seen:
+                seen.add(pair)
+                all_candidates.append(pair)
+        # Sort so outward-aligned candidates are evaluated first; they win ties.
+        if outward_unit is not None:
+            all_candidates.sort(
+                key=lambda dxdy: -float(np.dot(np.array(dxdy, dtype=float), outward_unit))
+            )
+        candidate_offsets = all_candidates
 
     best_offset = candidate_offsets[0]
     best_score = float("-inf")
     for dx, dy in candidate_offsets:
-        label_pos = anchor_disp + np.array([dx, dy], dtype=float)
+        cand_vec = np.array([dx, dy], dtype=float)
+        label_pos = anchor_disp + cand_vec
+
+        # Distance from the nearest data point (maximise).
         point_dists = np.linalg.norm(point_disp - label_pos, axis=1)
         min_point_dist = float(np.min(point_dists)) if len(point_dists) else 0.0
+
+        # Distance from the nearest previously placed label (maximise).
         used_dists = [float(np.linalg.norm(prev - label_pos)) for prev in used_label_positions]
         min_used_dist = min(used_dists) if used_dists else 1000.0
-        direction_bonus = 6.0 if dy > 0 else 0.0
+
+        # Outward-direction alignment bonus: cosine-weighted, max +40 px.
+        direction_bonus = 0.0
+        if outward_unit is not None:
+            cand_norm = float(np.linalg.norm(cand_vec))
+            if cand_norm > 1e-6:
+                direction_bonus = 40.0 * max(0.0, float(np.dot(cand_vec / cand_norm, outward_unit)))
+
         penalty = 0.0
+
+        # Forbidden axes regions.
         if forbidden_axes_regions:
             label_axes = ax.transAxes.inverted().transform(label_pos)
             for (x0, x1), (y0, y1) in forbidden_axes_regions:
                 if x0 <= label_axes[0] <= x1 and y0 <= label_axes[1] <= y1:
-                    penalty += 500.0
+                    penalty += 600.0
+
+        # Covariance-ellipse bonus (outside) / graduated penalty (inside).
         ellipse_bonus = 0.0
         if mean_xy is not None and inv_cov is not None and ellipse_scale is not None:
             cand_data = ax.transData.inverted().transform(label_pos)
             diff = np.asarray(cand_data, dtype=float) - np.asarray(mean_xy, dtype=float)
             mahal = float(np.sqrt(diff @ inv_cov @ diff))
-            if mahal >= ellipse_scale + 0.2:
-                ellipse_bonus = 80.0
+            if mahal >= ellipse_scale + 0.3:
+                ellipse_bonus = 120.0        # clearly outside ellipse
             elif mahal >= ellipse_scale:
-                ellipse_bonus = 35.0
+                ellipse_bonus = 60.0         # just outside ellipse
             else:
-                penalty += 180.0
+                depth = ellipse_scale - mahal  # > 0; larger = deeper inside
+                penalty += 120.0 + 90.0 * depth  # graduated: deeper → bigger penalty
+
+        # Axes-area bounds (near-hard constraint: penalty dominates all bonuses).
         x_axes, y_axes = ax.transAxes.inverted().transform(label_pos)
         if not (0.04 <= x_axes <= 0.96 and 0.06 <= y_axes <= 0.94):
-            penalty += 400.0
-        score = min_point_dist + 0.7 * min_used_dist + direction_bonus + ellipse_bonus - penalty
+            penalty += 1500.0
+
+        score = (
+            1.0 * min_point_dist
+            + 1.0 * min_used_dist
+            + direction_bonus
+            + ellipse_bonus
+            - penalty
+        )
         if score > best_score:
             best_score = score
             best_offset = (dx, dy)
@@ -2158,11 +2194,11 @@ def _plot_localization_panel(
         s=74,
         edgecolor="white",
         linewidth=0.8,
-        alpha=0.96,
+        alpha=0.8,
         zorder=3,
     )
     _draw_covariance_ellipse(ax_main, x, y, edgecolor=HIGHLIGHT_COLOR, alpha=0.9)
-    ax_main.plot(np.mean(x), np.mean(y), marker="+", color="black", markersize=12, markeredgewidth=1.8, zorder=4)
+    ax_main.plot(np.mean(x), np.mean(y), marker="+", color=HIGHLIGHT_COLOR, markersize=14, markeredgewidth=2.2, zorder=4)
     ax_main.axhline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
     ax_main.axvline(0.0, color=REFERENCE_LINE_COLOR, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
 
@@ -2254,6 +2290,8 @@ def _plot_single_localization_accuracy_figure(
     y_symbol: str,
     export_config: QAFigureExportConfig,
     file_stem: str,
+    legend_on: bool = True,
+    cbar_on: bool = True,
 ) -> list[Path]:
     cmap = mpl.cm.get_cmap("cividis")
     norm = mpl.colors.Normalize(vmin=0.0, vmax=1.0)
@@ -2307,25 +2345,28 @@ def _plot_single_localization_accuracy_figure(
                 label="Dashed ellipse: 95% covariance contour",
             ),
         ]
-        legend = fig.legend(
-            handles=legend_handles,
-            loc="upper center",
-            bbox_to_anchor=(0.5, 0.975),
-            ncol=2,
-            frameon=True,
-            fancybox=False,
-            framealpha=1.0,
-            edgecolor="#4a4a4a",
-            fontsize=export_config.legend_fontsize,
-            handlelength=2.2,
-            columnspacing=1.6,
-        )
-        legend.get_frame().set_linewidth(0.9)
+        if legend_on:
+            legend = fig.legend(
+                handles=legend_handles,
+                loc="upper center",
+                bbox_to_anchor=(0.45, 0.9),
+                ncol=2,
+                frameon=True,
+                fancybox=False,
+                framealpha=1.0,
+                edgecolor="#4a4a4a",
+                fontsize=export_config.legend_fontsize,
+                handlelength=2.2,
+                columnspacing=1.6,
+            )
+            legend.get_frame().set_linewidth(0.9)
 
-        cax = fig.add_axes([0.19, 0.075, 0.58, 0.022])
-        cbar = fig.colorbar(scatter, cax=cax, orientation="horizontal")
-        cbar.set_label(r"$\langle \mathcal{P}_{D} \rangle$", fontsize=export_config.axes_label_fontsize)
-        cbar.ax.tick_params(labelsize=export_config.tick_label_fontsize)
+        # even if the color bar is off I want to keep the same normalization for the scatter points so that the colors are comparable across panels
+        if cbar_on:
+            cax = fig.add_axes([0.15, 0.065, 0.58, 0.022])
+            cbar = fig.colorbar(scatter, cax=cax, orientation="horizontal")
+            cbar.set_label(r"$\langle \mathcal{P}_{D} \rangle$", fontsize=export_config.axes_label_fontsize)
+            cbar.ax.tick_params(labelsize=export_config.tick_label_fontsize)
 
         _add_inside_panel_box(ax, summary_text, export_config, x=0.97, y=0.03)
         return _save_figure_multi(fig, save_dir, file_stem, export_config)
@@ -2367,7 +2408,9 @@ def plot_localization_accuracy_centroids(
             x_symbol="x",
             y_symbol="y",
             export_config=export_config,
-            file_stem=file_stem,
+            file_stem=file_stem+"_transverse",
+            legend_on=True,
+            cbar_on=False,
         )
     )
     output_paths.extend(
@@ -2383,7 +2426,9 @@ def plot_localization_accuracy_centroids(
             x_symbol="z",
             y_symbol="y",
             export_config=export_config,
-            file_stem="Fig_QA_14_localization_accuracy_sagittal",
+            file_stem=file_stem+"_sagittal",
+            legend_on=False,
+            cbar_on=True,
         )
     )
     return output_paths
